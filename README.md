@@ -50,18 +50,18 @@ Chỗ cần viết thuật toán được đánh dấu `TODO(<tên>, Sprint n)`.
 
 ## Quy trình Git
 
-1. Mỗi task Jira làm trên **một nhánh riêng**, đặt tên theo mã task: `feature/PTB-12-bezier`.
-2. Commit nhỏ, ghi mã task ở đầu: `PTB-12: de Casteljau cho Bezier bac 3`. Jira sẽ tự gắn commit vào task.
+1. Mỗi task Jira (project **DHMTPTB3**, https://nguyenvanhaone.atlassian.net) làm trên **một nhánh riêng**, đặt tên theo mã task: `feature/DHMTPTB3-17-bezier`.
+2. Commit nhỏ, ghi mã task ở đầu: `DHMTPTB3-17: de Casteljau cho Bezier bac 3`. Jira sẽ tự gắn commit vào task.
 3. Trước khi mở Pull Request: `git pull origin main`, rồi chạy `make` và `make check` không lỗi.
 4. Mở Pull Request vào `main`. Cần **1 người khác duyệt** trước khi merge.
 5. Không push thẳng lên `main`.
 
 ```bash
 git checkout main && git pull
-git checkout -b feature/PTB-12-bezier
+git checkout -b feature/DHMTPTB3-17-bezier
 # ... code ...
-git add -A && git commit -m "PTB-12: de Casteljau cho Bezier bac 3"
-git push -u origin feature/PTB-12-bezier
+git add -A && git commit -m "DHMTPTB3-17: de Casteljau cho Bezier bac 3"
+git push -u origin feature/DHMTPTB3-17-bezier
 ```
 
 ## Cấu trúc
