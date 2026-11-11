@@ -34,6 +34,7 @@ Chương trình dựng một phòng trưng bày 3D. Các vật thể được si
 | Kéo chuột trái | Xoay góc nhìn |
 | + / - | Phóng to / thu nhỏ (orbit) |
 | G | Khung dây tạm bằng GL_LINES (chỉ để kiểm tra camera khi phần C chưa xong) |
+| X | Debug xén mặt gần: tô màu cam phần tam giác bị cắt, đỏ là cạnh nằm trên mặt phẳng gần |
 | Esc | Thoát |
 
 ## Ai làm phần nào
