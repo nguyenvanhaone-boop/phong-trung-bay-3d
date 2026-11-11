@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "modeling/modeling.hpp"
+#include "obj_loader.hpp"
 
 // ============================================================================
 // 1. MA TRAN QUAN SAT (look-at) — slide CG.4 "He quan sat"
@@ -205,7 +206,7 @@ SceneObject place(Mesh mesh, Vec3 position, float yawDeg = 0) {
 
 }  // namespace
 
-std::vector<SceneObject> buildRoom() {
+std::vector<SceneObject> buildRoom(const std::string& objPath, std::string* objError) {
     const Material floorMat = mat("san go", {0.55f, 0.38f, 0.24f}, {0.15f, 0.15f, 0.15f}, 16);
     const Material wallMat = mat("tuong", {0.85f, 0.83f, 0.78f}, {0.02f, 0.02f, 0.02f}, 4);
     const Material ceilMat = mat("tran", {0.92f, 0.92f, 0.92f}, {0, 0, 0}, 1);
@@ -253,6 +254,24 @@ std::vector<SceneObject> buildRoom() {
             lift = 0.18f;
         }
         room.push_back(place(std::move(exhibit), {base.x, 2 * standHalf.y + lift, base.z}, yaw));
+    }
+
+    // Buc thu 6 o giua phong cho vat nap tu file .obj (DHMTPTB3-42), mac dinh la am tra Utah.
+    if (!objPath.empty()) {
+        Mesh imported;
+        std::string err;
+        if (loadObj(objPath, imported, err)) {
+            fitToHeight(imported, 0.45f);  // doi toa do dinh, khong dung ma tran ti le
+            imported.material = mat("su bac", {0.75f, 0.75f, 0.78f}, {0.9f, 0.9f, 0.9f}, 96);
+            const Vec3 centerHalf{0.45f, 0.4f, 0.45f};
+            const Vec3 spot{0, 0, -1.2f};
+            SceneObject stand = place(makeBox(centerHalf, standMat), {spot.x, centerHalf.y, spot.z});
+            stand.mesh.name = "buc giua";
+            room.push_back(std::move(stand));
+            room.push_back(place(std::move(imported), {spot.x, 2 * centerHalf.y, spot.z}, -30));
+        } else if (objError) {
+            *objError = err;
+        }
     }
     return room;
 }
