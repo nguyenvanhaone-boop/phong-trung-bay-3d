@@ -72,6 +72,10 @@ static void checkDisplay() {
     expect(std::abs(counter.fps() - 10) < 1e-6, "5 frame / 0.5 giay = 10 FPS");
     counter.record(start + std::chrono::milliseconds(1500));
     expect(std::abs(counter.fps() - 1) < 1e-6, "FPS reset bo dem sau moi cua so");
+    FrameCounter fastCounter(start);
+    for (int frame = 1; frame <= 500; ++frame)
+        fastCounter.record(start + std::chrono::milliseconds(frame));
+    expect(std::abs(fastCounter.fps() - 1000) < 1e-6, "FPS khong bi kep o 60");
 }
 
 static void checkScanline() {
@@ -85,6 +89,13 @@ static void checkScanline() {
     fillTriangle(framebuffer, triangle, context, settings);
     expect(coloredPixels(framebuffer) == 45, "tam giac vuong 10x10: 45 tam pixel theo bien nua mo");
     const auto reference = framebuffer.color;
+    for (ShadingMode mode : {ShadingMode::Gouraud, ShadingMode::Phong}) {
+        settings.shading = mode;
+        framebuffer.clear({0, 0, 0});
+        fillTriangle(framebuffer, triangle, context, settings);
+        expect(framebuffer.color == reference, "che do chua ho tro fallback mau phang thay vi bo ve");
+    }
+    settings.shading = ShadingMode::Flat;
     int order[3] = {0, 1, 2};
     bool sameCoverage = true;
     do {
@@ -116,6 +127,20 @@ static void checkScanline() {
     framebuffer.clear({0, 0, 0});
     fillTriangle(framebuffer, general, context, settings);
     expect(coloredPixels(framebuffer) == 50, "tam giac 3 cao do khac nhau: doi canh giua");
+    const auto generalReference = framebuffer.color;
+    int generalOrder[3] = {0, 1, 2};
+    bool sameSplitCoverage = true;
+    do {
+        ScreenVertex permuted[3] = {general[generalOrder[0]], general[generalOrder[1]], general[generalOrder[2]]};
+        framebuffer.clear({0, 0, 0});
+        fillTriangle(framebuffer, permuted, context, settings);
+        sameSplitCoverage = sameSplitCoverage && framebuffer.color == generalReference;
+    } while (std::next_permutation(generalOrder, generalOrder + 3));
+    expect(sameSplitCoverage, "chia hai nua khong phu thuoc thu tu dinh");
+    ScreenVertex splitAtCenter[3] = {screenVertex(2, 1.5f), screenVertex(12, 6.5f), screenVertex(2, 11.5f)};
+    framebuffer.clear({0, 0, 0});
+    fillTriangle(framebuffer, splitAtCenter, context, settings);
+    expect(coloredPixels(framebuffer) == 50, "dong qua dinh giua chi thuoc nua duoi");
     ScreenVertex fractional[3] = {screenVertex(2.25f, 2.25f), screenVertex(12.25f, 2.25f), screenVertex(2.25f, 12.25f)};
     framebuffer.clear({0, 0, 0});
     fillTriangle(framebuffer, fractional, context, settings);
@@ -144,6 +169,24 @@ static void checkScanline() {
     Framebuffer empty;
     fillTriangle(empty, triangle, context, settings);
     expect(empty.color.empty(), "framebuffer rong khong gay loi");
+
+    SceneObject object;
+    object.mesh.vertices = {{{-0.5f, -0.5f, -1}, {0, 0, 1}},
+                            {{0.5f, -0.5f, -1}, {0, 0, 1}},
+                            {{0, 0.5f, -1}, {0, 0, 1}}};
+    object.mesh.triangles = {{0, 1, 2}};
+    object.mesh.material.kd = {0.25f, 0.75f, 0.5f};
+    settings.backFace = false;
+    FrameStats stats;
+    std::vector<std::uint8_t> flatScene;
+    for (ShadingMode mode : {ShadingMode::Flat, ShadingMode::Gouraud, ShadingMode::Phong}) {
+        settings.shading = mode;
+        framebuffer.clear({0, 0, 0});
+        renderScene(framebuffer, {object}, Camera{}, {Light{}}, settings, stats);
+        if (mode == ShadingMode::Flat) flatScene = framebuffer.color;
+        expect(coloredPixels(framebuffer) > 0 && framebuffer.color == flatScene,
+               "renderScene khoi tao mau cho ca Flat/Gouraud/Phong fallback");
+    }
 }
 
 int main() {

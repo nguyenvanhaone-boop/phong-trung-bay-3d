@@ -24,18 +24,23 @@ Sau `make`, chạy `./build/phong_trung_bay --render-demo` (Windows:
 `build\phong_trung_bay.exe --render-demo`) để xem hai tam giác màu phẳng
 không phụ thuộc vào Mesh/camera chưa hoàn thiện. Phím `T` chuyển demo/cảnh.
 
-- Framebuffer RGBA được đưa lên màn hình bằng `glDrawPixels`, đổi kích thước
-  theo cửa sổ; tọa độ logic có gốc trên trái, dữ liệu ảnh lưu hàng dưới trước.
-- Timer yêu cầu vẽ lại mỗi 16 ms, FPS đo số frame thực sự hoàn tất theo từng
-  khoảng tối thiểu 0,5 giây, kể cả khi không bấm phím. Đây là FPS có giới hạn
-  bởi timer/vsync, không phải benchmark tốc độ tối đa của rasterizer.
-- Scanline tìm giao điểm hai cạnh tại `y + 0.5`, tô các tâm pixel trong đoạn
-  `[xLeft, xRight)`, nhận cạnh theo `[yMin, yMax)`. Cạnh ngang không tạo giao
-  điểm; tam giác suy biến và tọa độ không hữu hạn bị bỏ qua. Giới hạn vòng
-  lặp vào framebuffer trước khi đổi sang chỉ số nguyên.
-- Hiện chỉ triển khai màu phẳng `tri[0].color`; chưa có chiếu sáng, Gouraud,
-  Phong, Z-buffer, Painter hay Back-face. Demo không áp dụng các phím chế độ
-  3D; các tính năng này thuộc task sau, không phải hai task này.
+- Framebuffer RGBA giữ cố định **960×540**, đưa lên màn hình bằng `glDrawPixels`
+  và `glPixelZoom`. Resize chỉ đổi viewport/tỷ lệ hiển thị, không đổi độ phân
+  giải render. Tọa độ logic có gốc trên trái, dữ liệu ảnh lưu hàng dưới trước.
+- `glutIdleFunc` yêu cầu vẽ lại liên tục, không còn timer giới hạn 16 ms. FPS
+  đo frame hoàn tất theo khoảng tối thiểu 0,5 giây; vẫn có thể bị giới hạn bởi
+  vsync/driver. Khi so sánh CPU renderer, dùng thêm thời gian biến đổi/tô (ms)
+  trên HUD, giữ cùng cảnh, chế độ và độ phân giải 960×540.
+- Scanline sắp đỉnh theo y, chia tại đỉnh giữa thành tam giác đáy bằng và
+  đỉnh bằng. Mỗi nửa tính hai hệ số `dx/dy = 1/m` một lần, rồi cộng dồn
+  `xLeft += dxLeft/dy`, `xRight += dxRight/dy` qua từng dòng. Không còn tìm
+  giao cả ba cạnh ở mỗi dòng. Lấy mẫu tâm pixel, dùng biên nửa mở
+  `[xLeft, xRight)` và `[yMin, yMax)`; bỏ nửa có chiều cao 0, tam giác suy
+  biến và tọa độ không hữu hạn; kẹp phạm vi trước khi đổi sang chỉ số nguyên.
+- Hiện chỉ tô màu phẳng `tri[0].color`. Phím 3/4 tạm dùng **flat fallback**
+  (HUD ghi rõ), không còn bỏ vẽ; chưa phải Gouraud/Phong thật. Phong fallback
+  được khởi tạo từ màu vật liệu. Lighting, Z-buffer, Painter và Back-face
+  vẫn thuộc task sau. Demo luôn dùng màu phẳng, độc lập các chế độ 3D.
 - Kiểm tra thủ công: hai tam giác cam/xanh không lật dọc; FPS cập nhật khi
   đứng yên; resize cửa sổ vẫn giữ hình đúng tỷ lệ tương đối; `T` chuyển cảnh
   và `Esc` thoát. `make check` kiểm tra RGBA, depth reset, FPS bằng thời gian

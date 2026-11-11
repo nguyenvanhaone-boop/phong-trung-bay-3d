@@ -38,8 +38,8 @@ const char* shadingName(ShadingMode m) {
     switch (m) {
         case ShadingMode::Wireframe: return "Khung day";
         case ShadingMode::Flat: return "Flat";
-        case ShadingMode::Gouraud: return "Gouraud";
-        case ShadingMode::Phong: return "Phong";
+        case ShadingMode::Gouraud: return "Gouraud (flat fallback)";
+        case ShadingMode::Phong: return "Phong (flat fallback)";
     }
     return "?";
 }
@@ -107,14 +107,12 @@ void display() {
     gFrameCounter.record();
 }
 
-void refresh(int) {
+void refresh() {
     glutPostRedisplay();
-    glutTimerFunc(16, refresh, 0);
 }
 
 void reshape(int w, int h) {
     gWinW = w > 0 ? w : 1; gWinH = h > 0 ? h : 1;
-    gFb.resize(gWinW, gWinH);
     glViewport(0, 0, gWinW, gWinH);
     glutPostRedisplay();
 }
@@ -203,7 +201,7 @@ int main(int argc, char** argv) {
     glutMouseFunc(mouse);
     glutMotionFunc(motion);
     gFrameCounter = FrameCounter{};
-    glutTimerFunc(16, refresh, 0);
+    glutIdleFunc(refresh);
     glutMainLoop();
     return 0;
 }

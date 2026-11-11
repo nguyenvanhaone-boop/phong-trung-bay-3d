@@ -21,7 +21,7 @@ bool isBackFace(const ScreenVertex tri[3]) {
 
 void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext& ctx, const RenderSettings& s) {
     (void)ctx;
-    if (fb.width <= 0 || fb.height <= 0 || s.shading != ShadingMode::Flat) return;
+    if (fb.width <= 0 || fb.height <= 0 || s.shading == ShadingMode::Wireframe) return;
     for (int vertex = 0; vertex < 3; ++vertex)
         if (!std::isfinite(tri[vertex].x) || !std::isfinite(tri[vertex].y)) return;
 
@@ -33,28 +33,31 @@ void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext
                       - (double(sorted[1]->y) - sorted[0]->y) * (double(sorted[2]->x) - sorted[0]->x);
     if (area == 0.0) return;
 
-    const int firstRow = static_cast<int>(std::clamp(std::ceil(double(sorted[0]->y) - 0.5), 0.0, double(fb.height)));
-    const int endRow = static_cast<int>(std::clamp(std::ceil(double(sorted[2]->y) - 0.5), 0.0, double(fb.height)));
-    for (int row = firstRow; row < endRow; ++row) {
-        const double sampleY = row + 0.5;
-        double intersections[3];
-        int count = 0;
-        for (int edge = 0; edge < 3; ++edge) {
-            const ScreenVertex* top = sorted[edge];
-            const ScreenVertex* bottom = sorted[(edge + 1) % 3];
-            if (top->y > bottom->y) std::swap(top, bottom);
-            if (sampleY < top->y || sampleY >= bottom->y) continue;
-            intersections[count++] = top->x + (sampleY - top->y) * (double(bottom->x) - top->x)
-                                              / (double(bottom->y) - top->y);
+    const auto fillHalf = [&](double topY, double bottomY, double topLeft, double topRight,
+                              double bottomLeft, double bottomRight) {
+        if (topY >= bottomY) return;
+        const double leftStep = (bottomLeft - topLeft) / (bottomY - topY);
+        const double rightStep = (bottomRight - topRight) / (bottomY - topY);
+        const int firstRow = static_cast<int>(std::clamp(std::ceil(topY - 0.5), 0.0, double(fb.height)));
+        const int endRow = static_cast<int>(std::clamp(std::ceil(bottomY - 0.5), 0.0, double(fb.height)));
+        double left = topLeft + (firstRow + 0.5 - topY) * leftStep;
+        double right = topRight + (firstRow + 0.5 - topY) * rightStep;
+        for (int row = firstRow; row < endRow; ++row) {
+            const int firstColumn = static_cast<int>(std::clamp(std::ceil(left - 0.5), 0.0, double(fb.width)));
+            const int endColumn = static_cast<int>(std::clamp(std::ceil(right - 0.5), 0.0, double(fb.width)));
+            for (int column = firstColumn; column < endColumn; ++column)
+                fb.setPixel(column, row, tri[0].color);
+            left += leftStep;
+            right += rightStep;
         }
-        if (count != 2) continue;
-        const double left = std::min(intersections[0], intersections[1]);
-        const double right = std::max(intersections[0], intersections[1]);
-        const int firstColumn = static_cast<int>(std::clamp(std::ceil(left - 0.5), 0.0, double(fb.width)));
-        const int endColumn = static_cast<int>(std::clamp(std::ceil(right - 0.5), 0.0, double(fb.width)));
-        for (int column = firstColumn; column < endColumn; ++column)
-            fb.setPixel(column, row, tri[0].color);
-    }
+    };
+
+    const double splitX = sorted[0]->x + (double(sorted[1]->y) - sorted[0]->y)
+                       * (double(sorted[2]->x) - sorted[0]->x) / (double(sorted[2]->y) - sorted[0]->y);
+    const double middleLeft = std::min(double(sorted[1]->x), splitX);
+    const double middleRight = std::max(double(sorted[1]->x), splitX);
+    fillHalf(sorted[0]->y, sorted[1]->y, sorted[0]->x, sorted[0]->x, middleLeft, middleRight);
+    fillHalf(sorted[1]->y, sorted[2]->y, middleLeft, middleRight, sorted[2]->x, sorted[2]->x);
 }
 
 void drawLineBresenham(Framebuffer& fb, int x0, int y0, int x1, int y1, Vec3 color) {
@@ -131,6 +134,7 @@ void renderScene(Framebuffer& fb, const std::vector<SceneObject>& objects, const
     ctx.lights = &lights; ctx.eye = eye;
     for (Pending& p : queue) {
         ctx.material = p.mat;
+        p.v[0].color = p.mat->kd;
         if (settings.shading == ShadingMode::Flat) {
             const Vec3 c = (p.v[0].world + p.v[1].world + p.v[2].world) / 3.0f;
             const Vec3 n = normalize(cross(p.v[1].world - p.v[0].world, p.v[2].world - p.v[0].world));
