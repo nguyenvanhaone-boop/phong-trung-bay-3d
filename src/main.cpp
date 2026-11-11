@@ -4,7 +4,7 @@
 // Phim tat:
 //   1 khung day   2 Flat   3 Gouraud   4 Phong   L Phong <-> Blinn-Phong
 //   B Back-face   Z Z-buffer   O Painter   V anh do sau   P chieu song song/phoi canh
-//   C di bo <-> orbit   W/A/S/D di chuyen   keo chuot trai: xoay   +/- phong to   Esc thoat
+//   C di bo <-> orbit   W/A/S/D di chuyen   keo chuot trai: xoay   +/- hoac con lan: phong to   Esc thoat
 //   G khung day tam (GL_LINES, chi de kiem tra camera khi phan C chua xong)
 //   X debug xen mat gan: to mau phan tam giac bi clipNear cat (trong khung day tam)
 
@@ -224,6 +224,14 @@ void special(int key, int, int) {
 
 void mouse(int button, int state, int x, int y) {
     if (button == GLUT_LEFT_BUTTON) { gDragging = state == GLUT_DOWN; gMouseX = x; gMouseY = y; }
+    // Con lan chuot: GLUT khong co ham rieng, freeglut gui con lan len/xuong thanh nut 3/4.
+    // Orbit: lan len = lai gan vat. Di bo: lan len = di toi.
+    if ((button == 3 || button == 4) && state == GLUT_DOWN) {
+        const bool up = button == 3;
+        if (gCamera.mode == Camera::Mode::Orbit) gCamera.zoom(up ? 0.9f : 1.1f);
+        else gCamera.walk(up ? 0.3f : -0.3f, 0);
+        glutPostRedisplay();
+    }
     // TODO(Hao, Sprint 4): click khong keo = chon vat bang tia.
 }
 

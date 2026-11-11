@@ -50,6 +50,11 @@ int main() {
         cam.target = {1, 1, 1}; cam.orbitRadius = 2; cam.orbitTheta = 0; cam.orbitPhi = 0;
         expect(near(cam.eyePosition(), {1, 1, 3}), "orbit: mat cach target 2 m theo +z");
         expect(near(transformPoint(cam.viewMatrix(), cam.target), {0, 0, -2}), "orbit: target nam giua tam nhin");
+        cam.zoom(0.5f);
+        expect(std::fabs(length(cam.eyePosition() - cam.target) - 1) < 1e-5f, "orbit zoom: ban kinh 2 -> 1, van nhin vao target");
+        for (int i = 0; i < 50; ++i) cam.zoom(0.5f);
+        expect(cam.orbitRadius >= 0.8f, "orbit zoom: khong lai xuyen vao vat (ban kinh >= 0,8 m)");
+        cam.orbitRadius = 2;
 
         // Phoi canh: diem tren mat phang gan -> z_ndc = -1, tren mat phang xa -> +1.
         Camera p; p.eye = {0, 0, 0};
