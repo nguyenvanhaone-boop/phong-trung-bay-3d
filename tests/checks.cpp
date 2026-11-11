@@ -98,6 +98,46 @@ int main() {
         expect(room.size() == 13 && allValid, "phong: san, tuong, tran + 5 buc + 5 vat, luoi hop le");
         std::printf("  phong co %zu vat, %d tam giac\n", room.size(), tris);
     }
+    {
+        // Xen mat gan (Sutherland–Hodgman), near = 1: "trong" la z <= -1.
+        auto vtx = [](float x, float y, float z, float u) {
+            ViewVertex v;
+            v.view = {x, y, z}; v.world = {x, y, z}; v.normal = {0, 0, 1}; v.u = u; v.v = 0;
+            return v;
+        };
+        const float n = 1;
+        const ViewVertex allIn[3] = {vtx(0, 0, -2, 0), vtx(1, 0, -2, 0), vtx(0, 1, -3, 0)};
+        const ViewVertex allOut[3] = {vtx(0, 0, 0.5f, 0), vtx(1, 0, -0.5f, 0), vtx(0, 1, 2, 0)};
+        expect(clipNear(allIn, n).size() == 3, "xen: tam giac nam truoc mat phang gan giu nguyen");
+        expect(clipNear(allOut, n).empty(), "xen: tam giac nam sau mat phang gan bi bo");
+
+        // 1 dinh trong (z = -3), 2 dinh ngoai (z = 1): ra tam giac nho hon, 3 dinh.
+        const ViewVertex one[3] = {vtx(0, 0, -3, 0), vtx(2, 0, 1, 1), vtx(0, 2, 1, 1)};
+        const std::vector<ViewVertex> p1 = clipNear(one, n);
+        bool ok1 = p1.size() == 3;
+        for (const ViewVertex& v : p1) ok1 = ok1 && v.view.z <= -n + 1e-6f;
+        // Canh (0,0,-3) -> (2,0,1) cat z = -1 tai t = 0.5: diem (1, 0, -1), u = 0.5.
+        bool hit = false;
+        for (const ViewVertex& v : p1) hit = hit || (near(v.view, {1, 0, -1}) && std::fabs(v.u - 0.5f) < 1e-5f);
+        expect(ok1 && hit, "xen 1 dinh trong: 3 dinh, giao diem dung, u noi suy cung t");
+
+        // 2 dinh trong, 1 dinh ngoai: ra tu giac 4 dinh, giu chieu nguoc kim dong ho.
+        const ViewVertex two[3] = {vtx(0, 0, -3, 0), vtx(2, 0, -3, 0), vtx(1, 2, 1, 0)};
+        const std::vector<ViewVertex> p2 = clipNear(two, n);
+        bool ok2 = p2.size() == 4;
+        for (const ViewVertex& v : p2) ok2 = ok2 && v.view.z <= -n + 1e-6f;
+        expect(ok2, "xen 2 dinh trong: tu giac 4 dinh, khong dinh nao sau mat phang gan");
+        if (p2.size() == 4) {
+            const Vec3 nBefore = cross(two[1].view - two[0].view, two[2].view - two[0].view);
+            bool sameWinding = true;
+            for (std::size_t k = 1; k + 1 < p2.size(); ++k)
+                sameWinding = sameWinding && dot(cross(p2[k].view - p2[0].view, p2[k + 1].view - p2[0].view), nBefore) > 0;
+            expect(sameWinding, "xen: cac tam giac quat giu chieu dinh (back-face van dung)");
+        }
+        // Dinh nam dung tren mat phang gan duoc coi la "trong", khong sinh dinh trung.
+        const ViewVertex onPlane[3] = {vtx(0, 0, -1, 0), vtx(1, 0, -2, 0), vtx(0, 1, -2, 0)};
+        expect(clipNear(onPlane, n).size() == 3, "xen: dinh nam dung tren mat phang gan giu nguyen");
+    }
 
     // --- C · Lam: SAU KHI CAI to dong quet ---
     // dem so pixel duoc to cua mot tam giac vuong 10x10 ~ 50.
