@@ -33,6 +33,7 @@ Chương trình dựng một phòng trưng bày 3D. Các vật thể được si
 | W A S D, mũi tên | Di chuyển |
 | Kéo chuột trái | Xoay góc nhìn |
 | + / - | Phóng to / thu nhỏ (orbit) |
+| G | Khung dây tạm bằng GL_LINES (chỉ để kiểm tra camera khi phần C chưa xong) |
 | Esc | Thoát |
 
 ## Ai làm phần nào
