@@ -48,7 +48,35 @@ Mat4 lookAt(Vec3 E, Vec3 C, Vec3 up);
 Mesh makeBox(Vec3 half, const Material& material, bool inward = false, unsigned faces = 0x3F);
 
 // Dung phong trung bay: san, tuong, tran, 5 buc va cac vat.
+// Thu tu: kRoomShellCount mat phong (san, tuong, tran), roi tung cap (buc, vat).
+constexpr int kRoomShellCount = 3;
 std::vector<SceneObject> buildRoom();
+
+// ---- Chon vat bang tia (Sprint 4, DHMTPTB3-36) ----
+// Ma tran nghich dao 4x4 (Gauss–Jordan). Tra ve false neu ma tran suy bien.
+bool inverse(const Mat4& m, Mat4& out);
+
+struct Ray {
+    Vec3 origin;  // diem goc (the gioi)
+    Vec3 dir;     // huong, da chuan hoa
+};
+
+// Tia tu mat di qua pixel (px, py) cua cua so w x h, (0,0) o goc TREN trai (nhu GLUT).
+// aspect = ti le khung hinh dang hien. Dung duoc ca phoi canh lan song song.
+Ray rayFromPixel(const Camera& camera, float px, float py, int w, int h, float aspect);
+
+struct PickResult {
+    int index = -1;    // chi so vat trong danh sach, -1 = khong trung vat nao
+    float t = 0;       // khoang cach tu goc tia toi diem trung (m)
+    Vec3 point;        // diem trung (the gioi)
+};
+
+// Giao tia voi moi tam giac MAT TRUOC cua moi vat (giong Back-face: mat quay lung bi bo qua),
+// lay diem trung gan nhat.
+PickResult pick(const std::vector<SceneObject>& objects, const Ray& ray);
+
+// Hop bao (the gioi) cua vat: tam va ban kinh mat cau bao quanh.
+void worldBounds(const SceneObject& object, Vec3& center, float& radius);
 
 // Xen tam giac (he quan sat) theo mat phang gan z = -nearPlane (Sutherland–Hodgman).
 // Tra ve da giac 0, 3 hoac 4 dinh; renderer chia lai thanh tam giac.

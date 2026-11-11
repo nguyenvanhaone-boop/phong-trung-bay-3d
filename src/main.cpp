@@ -6,9 +6,12 @@
 //   B Back-face   Z Z-buffer   O Painter   V anh do sau   P chieu song song/phoi canh
 //   C di bo <-> orbit   W/A/S/D di chuyen   keo chuot trai: xoay   +/- hoac con lan: phong to   Esc thoat
 //   G khung day tam (GL_LINES, chi de kiem tra camera khi phan C chua xong)
+//   Click chuot trai (khong keo): chon vat bang tia, orbit quanh vat, hien bang thong tin
 //   X debug xen mat gan: to mau phan tam giac bi clipNear cat (trong khung day tam)
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -34,12 +37,67 @@ double gFps = 0;
 int gFrames = 0;
 auto gFpsT0 = std::chrono::steady_clock::now();
 int gMouseX = 0, gMouseY = 0;
+int gDownX = 0, gDownY = 0;  // vi tri bam chuot trai: tha ra gan cho cu = click (chon vat), xa = keo (xoay)
 bool gDragging = false;
+int gSelected = -1;          // vat dang chon (chi so trong gObjects), -1 = chua chon
 
 // CHE DO XEM TAM (phim G): ve khung day bang GL_LINES, chi de kiem tra camera va phong
 // trong luc phan C (Lam) chua co bo to tam giac. Dung chung ma tran view/projection tu cai
 // cua phan B, nen thay dung hinh la camera dung. Khi phan C xong: doi mac dinh thanh false.
 bool gDebugWire = true;
+
+// Ti le khung cua anh dang hien: khung day tam ve theo cua so, renderer ve theo framebuffer.
+float shownAspect() {
+    return gDebugWire ? static_cast<float>(gWinW) / gWinH : static_cast<float>(gFb.width) / gFb.height;
+}
+
+// Chuyen sang orbit quanh `center`, dung o phia minh dang dung (khong nhay ra sau vat).
+// Mat orbit = target + R (cos(phi) sin(theta), sin(phi), cos(phi) cos(theta)) nen
+// theta = atan2(dx, dz) voi (dx, dz) = huong tu target toi mat hien tai.
+void orbitAround(Vec3 center, float radius) {
+    const Vec3 e = gCamera.eyePosition();
+    gCamera.target = center;
+    gCamera.orbitRadius = radius;
+    gCamera.orbitTheta = std::atan2(e.x - center.x, e.z - center.z);
+    gCamera.orbitPhi = 0.35f;
+    gCamera.mode = Camera::Mode::Orbit;
+}
+
+// Click (khong keo): ban tia qua pixel, chon vat gan nhat. Trung vat trung bay hoac buc thi
+// orbit quanh no; trung san/tuong/tran thi chi hien thong tin; trung khoang trong thi bo chon.
+void selectAt(int x, int y) {
+    const Ray ray = rayFromPixel(gCamera, static_cast<float>(x), static_cast<float>(y), gWinW, gWinH, shownAspect());
+    const PickResult hit = pick(gObjects, ray);
+    gSelected = hit.index;
+    if (hit.index >= kRoomShellCount) {
+        Vec3 c;
+        float r;
+        worldBounds(gObjects[hit.index], c, r);
+        orbitAround(c, std::max(1.2f, 3.0f * r));
+    }
+}
+
+void drawText(int x, int y, const std::string& s);
+
+// Bang thong tin vat dang chon, goc duoi trai.
+void drawSelectionPanel() {
+    if (gSelected < 0 || gSelected >= static_cast<int>(gObjects.size())) return;
+    const SceneObject& o = gObjects[gSelected];
+    const Material& m = o.mesh.material;
+    Vec3 c;
+    float r;
+    worldBounds(o, c, r);
+    char buf[4][160];
+    std::snprintf(buf[0], sizeof buf[0], "Vat dang chon: %s", o.mesh.name.c_str());
+    std::snprintf(buf[1], sizeof buf[1], "%zu tam giac, %zu dinh | tam (%.2f, %.2f, %.2f), ban kinh bao %.2f m",
+                  o.mesh.triangles.size(), o.mesh.vertices.size(), c.x, c.y, c.z, r);
+    std::snprintf(buf[2], sizeof buf[2], "Vat lieu: %s | kd (%.2f, %.2f, %.2f) | ks (%.2f, %.2f, %.2f) | n = %.0f",
+                  m.name.c_str(), m.kd.x, m.kd.y, m.kd.z, m.ks.x, m.ks.y, m.ks.z, m.shininess);
+    std::snprintf(buf[3], sizeof buf[3], "%s", gSelected >= kRoomShellCount ? "Keo chuot: xoay quanh vat | con lan, +/-: zoom | C: ve di bo"
+                                                                             : "Click vao buc hoac vat de xoay quanh no");
+    glColor3f(1.0f, 0.9f, 0.3f);
+    for (int i = 0; i < 4; ++i) drawText(8, 10 + 16 * (3 - i), buf[i]);
+}
 
 const char* shadingName(ShadingMode m) {
     switch (m) {
@@ -88,7 +146,9 @@ void drawDebugWire() {
 
     gClippedPolys = 0;
     glBegin(GL_LINES);
-    for (const SceneObject& obj : gObjects) {
+    for (std::size_t oi = 0; oi < gObjects.size(); ++oi) {
+        const SceneObject& obj = gObjects[oi];
+        const bool selected = static_cast<int>(oi) == gSelected;
         const Mat4 mv = view * obj.model;
         for (const auto& t : obj.mesh.triangles) {
             ViewVertex tri[3];
@@ -106,6 +166,7 @@ void drawDebugWire() {
                 const ViewVertex& b = poly[(e + 1) % n];
                 if (highlight && onNear(a) && onNear(b)) glColor3f(1.0f, 0.2f, 0.2f);  // canh tren mat phang gan
                 else if (highlight) glColor3f(1.0f, 0.6f, 0.1f);
+                else if (selected) glColor3f(1.0f, 0.9f, 0.3f);  // vat dang chon: vang
                 else glColor3f(0.45f, 0.85f, 1.0f);
                 toScreen(a);
                 toScreen(b);
@@ -155,6 +216,7 @@ void display() {
         drawText(8, gWinH - 66, line4);
     }
     if (gObjects.empty()) drawText(8, gWinH - 74, "Khung code OK - canh con trong (buildRoom chua cai).");
+    drawSelectionPanel();
 
     glutSwapBuffers();
 }
@@ -183,18 +245,20 @@ void keyboard(unsigned char key, int, int) {
         case 'c': case 'C':
             if (gCamera.mode == Camera::Mode::Walk) {
                 // Sang orbit quanh vat trung bay gan nhat voi diem dang nhin (cach mat 2 m).
-                // Thu tu trong buildRoom(): 3 mat phong, roi tung cap (buc, vat).
+                // Thu tu trong buildRoom(): kRoomShellCount mat phong, roi tung cap (buc, vat).
                 const Vec3 look = gCamera.eye + gCamera.forward() * 2.0f;
                 float best = 1e9f;
-                for (std::size_t i = 4; i < gObjects.size(); i += 2) {
+                int bestIdx = -1;
+                for (std::size_t i = kRoomShellCount + 1; i < gObjects.size(); i += 2) {
                     const Vec3 p{gObjects[i].model.m[0][3], gObjects[i].model.m[1][3], gObjects[i].model.m[2][3]};
                     const float d = length(p - look);
-                    if (d < best) { best = d; gCamera.target = p; }
+                    if (d < best) { best = d; bestIdx = static_cast<int>(i); }
                 }
-                gCamera.orbitRadius = 1.6f;
-                gCamera.orbitTheta = gCamera.yaw + kPi;  // dung o phia minh dang dung
-                gCamera.orbitPhi = 0.35f;
-                gCamera.mode = Camera::Mode::Orbit;
+                if (bestIdx >= 0) {
+                    const SceneObject& o = gObjects[bestIdx];
+                    gSelected = bestIdx;
+                    orbitAround({o.model.m[0][3], o.model.m[1][3], o.model.m[2][3]}, 1.6f);
+                }
             } else {
                 gCamera.mode = Camera::Mode::Walk;
             }
@@ -223,7 +287,16 @@ void special(int key, int, int) {
 }
 
 void mouse(int button, int state, int x, int y) {
-    if (button == GLUT_LEFT_BUTTON) { gDragging = state == GLUT_DOWN; gMouseX = x; gMouseY = y; }
+    if (button == GLUT_LEFT_BUTTON) {
+        gDragging = state == GLUT_DOWN;
+        gMouseX = x; gMouseY = y;
+        if (state == GLUT_DOWN) { gDownX = x; gDownY = y; }
+        // Tha chuot gan cho bam (<= 3 pixel) = click: chon vat bang tia.
+        if (state == GLUT_UP && std::abs(x - gDownX) <= 3 && std::abs(y - gDownY) <= 3) {
+            selectAt(x, y);
+            glutPostRedisplay();
+        }
+    }
     // Con lan chuot: GLUT khong co ham rieng, freeglut gui con lan len/xuong thanh nut 3/4.
     // Orbit: lan len = lai gan vat. Di bo: lan len = di toi.
     if ((button == 3 || button == 4) && state == GLUT_DOWN) {
@@ -232,7 +305,6 @@ void mouse(int button, int state, int x, int y) {
         else gCamera.walk(up ? 0.3f : -0.3f, 0);
         glutPostRedisplay();
     }
-    // TODO(Hao, Sprint 4): click khong keo = chon vat bang tia.
 }
 
 void motion(int x, int y) {

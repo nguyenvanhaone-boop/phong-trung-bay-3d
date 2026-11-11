@@ -258,7 +258,123 @@ std::vector<SceneObject> buildRoom() {
 }
 
 // ============================================================================
-// 6. XEN MAT GAN — Sprint 3 (DHMTPTB3-30), slide CG.4 "Xen hinh"
+// 6. CHON VAT BANG TIA — Sprint 4 (DHMTPTB3-36)
+// ============================================================================
+// Ma tran nghich dao bang Gauss–Jordan: bien doi [M | I] thanh [I | M^-1].
+// Moi cot chon hang co |phan tu| lon nhat lam truc (pivot) de giam sai so.
+bool inverse(const Mat4& m, Mat4& out) {
+    float a[4][8];
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 4; ++j) { a[i][j] = m.m[i][j]; a[i][j + 4] = (i == j) ? 1.0f : 0.0f; }
+    for (int col = 0; col < 4; ++col) {
+        int piv = col;
+        for (int r = col + 1; r < 4; ++r)
+            if (std::fabs(a[r][col]) > std::fabs(a[piv][col])) piv = r;
+        if (std::fabs(a[piv][col]) < 1e-12f) return false;  // suy bien
+        if (piv != col)
+            for (int j = 0; j < 8; ++j) std::swap(a[piv][j], a[col][j]);
+        const float inv = 1.0f / a[col][col];
+        for (int j = 0; j < 8; ++j) a[col][j] *= inv;
+        for (int r = 0; r < 4; ++r) {
+            if (r == col || a[r][col] == 0) continue;
+            const float f = a[r][col];
+            for (int j = 0; j < 8; ++j) a[r][j] -= f * a[col][j];
+        }
+    }
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 4; ++j) out.m[i][j] = a[i][j + 4];
+    return true;
+}
+
+// Pixel -> tia: lam NGUOC duong ong ve hinh.
+//   pixel -> NDC: x = 2 px / w - 1, y = 1 - 2 py / h (y man hinh huong xuong)
+//   Lay 2 diem cung (x, y): tren mat phang gan (z_ndc = -1) va mat phang xa (z_ndc = +1),
+//   nhan voi (P * V)^-1 roi chia w -> 2 diem trong the gioi. Tia = tu diem gan toi diem xa.
+// Cach nay dung cho ca phoi canh (cac tia toa ra tu mat) va song song (cac tia song song).
+Ray rayFromPixel(const Camera& camera, float px, float py, int w, int h, float aspect) {
+    const float x = 2.0f * px / w - 1.0f;
+    const float y = 1.0f - 2.0f * py / h;
+    Mat4 inv;
+    if (!inverse(camera.projectionMatrix(aspect) * camera.viewMatrix(), inv))
+        return {camera.eyePosition(), camera.forward()};
+    auto unproject = [&](float zNdc) {
+        const Vec4 p = inv * Vec4{x, y, zNdc, 1};
+        return Vec3{p.x / p.w, p.y / p.w, p.z / p.w};
+    };
+    const Vec3 a = unproject(-1), b = unproject(1);
+    return {a, normalize(b - a)};
+}
+
+namespace {
+
+// Moller–Trumbore: giai O + t D = (1 - u - v) A + u B + v C.
+// det > 0 khi tia nhin vao mat truoc (tam giac nguoc chieu kim dong ho khi nhin tu phia tia).
+bool intersectTriangle(Vec3 O, Vec3 D, Vec3 A, Vec3 B, Vec3 C, float& t) {
+    const Vec3 e1 = B - A, e2 = C - A;
+    const Vec3 p = cross(D, e2);
+    const float det = dot(e1, p);
+    if (det < 1e-9f) return false;                 // mat quay lung hoac tia song song voi mat
+    const float invDet = 1.0f / det;
+    const Vec3 s = O - A;
+    const float u = dot(s, p) * invDet;
+    if (u < 0 || u > 1) return false;
+    const Vec3 q = cross(s, e1);
+    const float v = dot(D, q) * invDet;
+    if (v < 0 || u + v > 1) return false;
+    t = dot(e2, q) * invDet;
+    return t > 0;
+}
+
+}  // namespace
+
+// Giao trong he toa do CUA VAT (khong bien doi tung dinh sang the gioi):
+//   dua tia ve he vat bang M^-1: O' = M^-1 O (w = 1), D' = M^-1 D (w = 0).
+// KHONG chuan hoa D': khi do diem trung O' + t D' ung voi O + t D trong the gioi,
+// nen t cua cac vat khac nhau so sanh truc tiep duoc (M la phep affine).
+PickResult pick(const std::vector<SceneObject>& objects, const Ray& ray) {
+    PickResult best;
+    float bestT = 1e30f;
+    for (std::size_t i = 0; i < objects.size(); ++i) {
+        const SceneObject& obj = objects[i];
+        if (!obj.visible) continue;
+        Mat4 inv;
+        if (!inverse(obj.model, inv)) continue;
+        const Vec3 O = transformPoint(inv, ray.origin);
+        const Vec3 D = transformDir(inv, ray.dir);
+        const auto& vs = obj.mesh.vertices;
+        for (const auto& tri : obj.mesh.triangles) {
+            float t;
+            if (intersectTriangle(O, D, vs[tri[0]].position, vs[tri[1]].position, vs[tri[2]].position, t) && t < bestT) {
+                bestT = t;
+                best.index = static_cast<int>(i);
+            }
+        }
+    }
+    if (best.index >= 0) {
+        best.t = bestT;
+        best.point = ray.origin + ray.dir * bestT;
+    }
+    return best;
+}
+
+void worldBounds(const SceneObject& object, Vec3& center, float& radius) {
+    if (object.mesh.vertices.empty()) {
+        center = transformPoint(object.model, {0, 0, 0});
+        radius = 0;
+        return;
+    }
+    Vec3 lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
+    for (const Vertex& v : object.mesh.vertices) {
+        const Vec3 p = transformPoint(object.model, v.position);
+        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
+        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+    }
+    center = (lo + hi) * 0.5f;
+    radius = length(hi - lo) * 0.5f;
+}
+
+// ============================================================================
+// 7. XEN MAT GAN — Sprint 3 (DHMTPTB3-30), slide CG.4 "Xen hinh"
 // ============================================================================
 // Vi sao phai xen: dinh nam sau mat (z >= 0) co w = -z <= 0, chia cho w lam dinh "lat" sang
 // phia doi dien man hinh -> tam giac vo, keo dai ca man hinh (dung loi thay khi di sat vat).
