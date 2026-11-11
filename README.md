@@ -18,6 +18,29 @@ Chương trình dựng một phòng trưng bày 3D. Các vật thể được si
 
 `make check` chạy các bài kiểm tra thuật toán mà không cần mở cửa sổ.
 
+### Demo hiển thị của Lâm (DHMTPTB3-18, DHMTPTB3-19)
+
+Sau `make`, chạy `./build/phong_trung_bay --render-demo` (Windows:
+`build\phong_trung_bay.exe --render-demo`) để xem hai tam giác màu phẳng
+không phụ thuộc vào Mesh/camera chưa hoàn thiện. Phím `T` chuyển demo/cảnh.
+
+- Framebuffer RGBA được đưa lên màn hình bằng `glDrawPixels`, đổi kích thước
+  theo cửa sổ; tọa độ logic có gốc trên trái, dữ liệu ảnh lưu hàng dưới trước.
+- Timer yêu cầu vẽ lại mỗi 16 ms, FPS đo số frame thực sự hoàn tất theo từng
+  khoảng tối thiểu 0,5 giây, kể cả khi không bấm phím. Đây là FPS có giới hạn
+  bởi timer/vsync, không phải benchmark tốc độ tối đa của rasterizer.
+- Scanline tìm giao điểm hai cạnh tại `y + 0.5`, tô các tâm pixel trong đoạn
+  `[xLeft, xRight)`, nhận cạnh theo `[yMin, yMax)`. Cạnh ngang không tạo giao
+  điểm; tam giác suy biến và tọa độ không hữu hạn bị bỏ qua. Giới hạn vòng
+  lặp vào framebuffer trước khi đổi sang chỉ số nguyên.
+- Hiện chỉ triển khai màu phẳng `tri[0].color`; chưa có chiếu sáng, Gouraud,
+  Phong, Z-buffer, Painter hay Back-face. Demo không áp dụng các phím chế độ
+  3D; các tính năng này thuộc task sau, không phải hai task này.
+- Kiểm tra thủ công: hai tam giác cam/xanh không lật dọc; FPS cập nhật khi
+  đứng yên; resize cửa sổ vẫn giữ hình đúng tỷ lệ tương đối; `T` chuyển cảnh
+  và `Esc` thoát. `make check` kiểm tra RGBA, depth reset, FPS bằng thời gian
+  giả lập, scanline, cạnh chung, hoán vị đỉnh, clipping màn hình và đầu vào lỗi.
+
 ## Phím tắt
 
 | Phím | Chức năng |
@@ -34,6 +57,7 @@ Chương trình dựng một phòng trưng bày 3D. Các vật thể được si
 | Kéo chuột trái | Xoay góc nhìn |
 | + / - | Phóng to / thu nhỏ (orbit) |
 | Esc | Thoát |
+| T | Demo scanline màu phẳng ↔ cảnh 3D |
 
 ## Ai làm phần nào
 

@@ -15,6 +15,7 @@
 #include "framebuffer.hpp"
 #include "pipeline.hpp"
 #include "platform/gl.hpp"
+#include "platform/frame_counter.hpp"
 #include "render/render.hpp"
 #include "scene/scene.hpp"
 
@@ -28,9 +29,8 @@ Camera gCamera;
 RenderSettings gSettings;
 FrameStats gStats;
 
-double gFps = 0;
-int gFrames = 0;
-auto gFpsT0 = std::chrono::steady_clock::now();
+FrameCounter gFrameCounter;
+bool gRenderDemo = false;
 int gMouseX = 0, gMouseY = 0;
 bool gDragging = false;
 
@@ -61,40 +61,69 @@ void present() {
     glPixelZoom(1, 1);
 }
 
+void drawRenderDemo() {
+    const float width = static_cast<float>(gFb.width);
+    const float height = static_cast<float>(gFb.height);
+    ScreenVertex triangles[2][3]{};
+    triangles[0][0].x = width * 0.15f; triangles[0][0].y = height * 0.25f;
+    triangles[0][1].x = width * 0.85f; triangles[0][1].y = height * 0.25f;
+    triangles[0][2].x = width * 0.50f; triangles[0][2].y = height * 0.85f;
+    triangles[0][0].color = {0.95f, 0.35f, 0.12f};
+    triangles[1][0].x = width * 0.30f; triangles[1][0].y = height * 0.70f;
+    triangles[1][1].x = width * 0.70f; triangles[1][1].y = height * 0.70f;
+    triangles[1][2].x = width * 0.50f; triangles[1][2].y = height * 0.35f;
+    triangles[1][0].color = {0.10f, 0.75f, 0.85f};
+    RenderSettings settings;
+    settings.zBuffer = false;
+    const auto start = std::chrono::steady_clock::now();
+    for (const auto& triangle : triangles) fillTriangle(gFb, triangle, ShadeContext{}, settings);
+    gStats = FrameStats{};
+    gStats.trianglesIn = gStats.trianglesDrawn = 2;
+    gStats.msRaster = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+}
+
 void display() {
     gFb.clear({0.12f, 0.12f, 0.14f});
-    renderScene(gFb, gObjects, gCamera, gLights, gSettings, gStats);
+    if (gRenderDemo) drawRenderDemo();
+    else renderScene(gFb, gObjects, gCamera, gLights, gSettings, gStats);
 
     glClear(GL_COLOR_BUFFER_BIT);
     present();
 
-    ++gFrames;
-    const double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - gFpsT0).count();
-    if (dt >= 0.5) { gFps = gFrames / dt; gFrames = 0; gFpsT0 = std::chrono::steady_clock::now(); }
-
     char line1[160], line2[160];
-    std::snprintf(line1, sizeof line1, "%.0f FPS | %s | Back-face %s | %s | %s", gFps, shadingName(gSettings.shading),
+    std::snprintf(line1, sizeof line1, "%.0f FPS | %s | Back-face %s | %s | %s", gFrameCounter.fps(), shadingName(gSettings.shading),
                   gSettings.backFace ? "bat" : "tat", gSettings.painter ? "Painter" : (gSettings.zBuffer ? "Z-buffer" : "khong khu"),
                   gCamera.projection == Projection::Perspective ? "phoi canh" : "song song");
+    if (gRenderDemo)
+        std::snprintf(line1, sizeof line1, "%.0f FPS | Demo scanline | Flat color | No depth test | T: scene", gFrameCounter.fps());
     std::snprintf(line2, sizeof line2, "tam giac: %d vao, %d bo (back-face), %d ve | bien doi %.1f ms, to %.1f ms",
                   gStats.trianglesIn, gStats.culledBackFace, gStats.trianglesDrawn, gStats.msTransform, gStats.msRaster);
     glColor3f(1, 1, 1);
     drawText(8, gWinH - 18, line1);
     drawText(8, gWinH - 34, line2);
-    if (gObjects.empty()) drawText(8, gWinH - 58, "Khung code OK - canh con trong (buildRoom chua cai).");
+    if (!gRenderDemo && gObjects.empty()) drawText(8, gWinH - 58, "Canh con trong (buildRoom chua cai). Nhan T: demo scanline.");
 
     glutSwapBuffers();
+    gFrameCounter.record();
+}
+
+void refresh(int) {
+    glutPostRedisplay();
+    glutTimerFunc(16, refresh, 0);
 }
 
 void reshape(int w, int h) {
-    gWinW = w; gWinH = h > 0 ? h : 1;
+    gWinW = w > 0 ? w : 1; gWinH = h > 0 ? h : 1;
+    gFb.resize(gWinW, gWinH);
     glViewport(0, 0, gWinW, gWinH);
+    glutPostRedisplay();
 }
 
 void keyboard(unsigned char key, int, int) {
     const float step = 0.15f;
     switch (key) {
         case 27: std::exit(0);
+        case 't': case 'T': gRenderDemo = !gRenderDemo; break;
         case '1': gSettings.shading = ShadingMode::Wireframe; break;
         case '2': gSettings.shading = ShadingMode::Flat; break;
         case '3': gSettings.shading = ShadingMode::Gouraud; break;
@@ -150,6 +179,15 @@ void motion(int x, int y) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    for (int argument = 1; argument < argc; ) {
+        if (std::string(argv[argument]) == "--render-demo") {
+            gRenderDemo = true;
+            for (int next = argument; next < argc; ++next) argv[next] = argv[next + 1];
+            --argc;
+        } else {
+            ++argument;
+        }
+    }
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
     glutInitWindowSize(gWinW, gWinH);
@@ -164,6 +202,8 @@ int main(int argc, char** argv) {
     glutSpecialFunc(special);
     glutMouseFunc(mouse);
     glutMotionFunc(motion);
+    gFrameCounter = FrameCounter{};
+    glutTimerFunc(16, refresh, 0);
     glutMainLoop();
     return 0;
 }
