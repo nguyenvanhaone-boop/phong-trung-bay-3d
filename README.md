@@ -32,6 +32,7 @@ Chương trình dựng một phòng trưng bày 3D. Các vật thể được si
 | C | Camera đi bộ ↔ orbit |
 | W A S D, mũi tên | Di chuyển |
 | Kéo chuột trái | Xoay góc nhìn |
+| Click chuột trái | Chọn vật bằng tia: orbit quanh vật, hiện tên, số tam giác, vật liệu |
 | + / -, con lăn chuột | Phóng to / thu nhỏ (orbit); khi đi bộ con lăn để đi tới/lùi |
 | G | Khung dây tạm bằng GL_LINES (chỉ để kiểm tra camera khi phần C chưa xong) |
 | X | Debug xén mặt gần: tô màu cam phần tam giác bị cắt, đỏ là cạnh nằm trên mặt phẳng gần |

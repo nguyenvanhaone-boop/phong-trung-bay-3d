@@ -144,6 +144,60 @@ int main() {
         expect(clipNear(onPlane, n).size() == 3, "xen: dinh nam dung tren mat phang gan giu nguyen");
     }
 
+    {
+        // Chon vat bang tia (DHMTPTB3-36).
+        const Mat4 M = translate({1, 2, 3}) * rotateY(radians(30)) * scale({2, 1, 0.5f});
+        Mat4 Mi;
+        const bool okInv = inverse(M, Mi);
+        const Mat4 I = M * Mi;
+        bool isId = okInv;
+        for (int i = 0; i < 4; ++i)
+            for (int j = 0; j < 4; ++j) isId = isId && std::fabs(I.m[i][j] - (i == j ? 1.0f : 0.0f)) < 1e-5f;
+        expect(isId, "nghich dao: M * M^-1 = I");
+        Mat4 dummy;
+        expect(!inverse(scale({1, 0, 1}), dummy), "nghich dao: ma tran suy bien tra ve false");
+
+        // Pixel giua man hinh -> tia trung voi huong nhin, ca phoi canh lan song song.
+        Camera cam;
+        cam.eye = {0, 1.6f, 4};
+        const Ray r = rayFromPixel(cam, 480, 270, 960, 540, 960.0f / 540);
+        expect(near(r.dir, cam.forward(), 1e-3f) && length(cross(r.origin - cam.eye, cam.forward())) < 1e-3f,
+               "tia qua tam man hinh: di theo huong nhin, xuat phat tu mat");
+        cam.projection = Projection::Parallel;
+        const Ray r1 = rayFromPixel(cam, 100, 100, 960, 540, 960.0f / 540);
+        const Ray r2 = rayFromPixel(cam, 800, 400, 960, 540, 960.0f / 540);
+        expect(near(r1.dir, r2.dir, 1e-3f) && near(r1.dir, cam.forward(), 1e-3f), "chieu song song: moi tia song song voi huong nhin");
+        cam.projection = Projection::Perspective;
+
+        // Hai hop tren cung mot duong nhin: chon hop gan hon; hop xa duoc dat bang ma tran co ti le.
+        std::vector<SceneObject> objs(2);
+        objs[0].mesh = makeBox({0.5f, 0.5f, 0.5f}, Material{});
+        objs[0].model = translate({0, 1.6f, -6}) * scale({2, 2, 2});
+        objs[1].mesh = makeBox({0.5f, 0.5f, 0.5f}, Material{});
+        objs[1].model = translate({0, 1.6f, 0}) * rotateY(radians(45));
+        const PickResult hit = pick(objs, r);
+        expect(hit.index == 1, "chon: trung hop gan hon khi 2 hop chong len nhau");
+        // Hop gan quay 45 do: canh dung cua hop huong ve mat, nam o z = 0,5*sqrt(2).
+        // (Goc tia nam tren mat phang gan, cach mat 0,1 m, nen so diem trung thay vi t.)
+        expect(near(hit.point, {0, 1.6f, 0.5f * std::sqrt(2.0f)}, 1e-3f), "chon: diem trung dung (qua ma tran nghich dao)");
+        objs[1].visible = false;
+        const PickResult far = pick(objs, r);
+        expect(far.index == 0 && near(far.point, {0, 1.6f, -5}, 1e-3f), "chon: hop xa phong to 2 lan, diem trung dung (t khong doi khi doi he toa do)");
+        const Ray miss = rayFromPixel(cam, 5, 5, 960, 540, 960.0f / 540);
+        expect(pick(objs, miss).index == -1, "chon: click vao khoang trong -> khong chon");
+
+        // Dung trong hop (giong dung trong phong): mat hop quay lung -> khong chan tia.
+        objs[1].visible = true;
+        Ray inside{{0, 1.6f, 0}, {0, 0, -1}};
+        expect(pick(objs, inside).index == 0, "chon: bo qua mat quay lung (dung ben trong hop)");
+
+        // Phong that: click giua man hinh tu cho xuat phat trung tuong cuoi (khong trung tran/san).
+        const std::vector<SceneObject> room = buildRoom();
+        Camera start;
+        const PickResult wall = pick(room, rayFromPixel(start, 480, 270, 960, 540, 960.0f / 540));
+        expect(wall.index == 1 && std::fabs(wall.point.z + kRoomHalfZ) < 1e-3f, "phong: tia giua man hinh trung tuong cuoi");
+    }
+
     // --- C · Lam: SAU KHI CAI to dong quet ---
     // dem so pixel duoc to cua mot tam giac vuong 10x10 ~ 50.
 
