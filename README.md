@@ -18,6 +18,8 @@ Chương trình dựng một phòng trưng bày 3D. Các vật thể được si
 
 `make check` chạy các bài kiểm tra thuật toán mà không cần mở cửa sổ.
 
+Bục giữa phòng mặc định đặt ấm trà Utah ([assets/teapot.obj](assets/teapot.obj)). Muốn nạp vật khác thì chạy `./build/phong_trung_bay duong/dan/vat.obj`.
+
 ## Phím tắt
 
 | Phím | Chức năng |
@@ -76,5 +78,6 @@ src/modeling/   phần A
 src/scene/      phần B
 src/render/     phần C (renderScene đã nối sẵn các bước)
 src/platform/   chọn header GLUT theo hệ điều hành
+assets/         mô hình .obj mẫu (ấm trà Utah)
 tests/          make check
 ```
