@@ -258,13 +258,55 @@ std::vector<SceneObject> buildRoom() {
 }
 
 // ============================================================================
-// 6. XEN MAT GAN — Sprint 3 (DHMTPTB3-30)
+// 6. XEN MAT GAN — Sprint 3 (DHMTPTB3-30), slide CG.4 "Xen hinh"
 // ============================================================================
+// Vi sao phai xen: dinh nam sau mat (z >= 0) co w = -z <= 0, chia cho w lam dinh "lat" sang
+// phia doi dien man hinh -> tam giac vo, keo dai ca man hinh (dung loi thay khi di sat vat).
+// Xen trong he quan sat, TRUOC khi chieu, vi o day mat phang gan chi la z = -n.
+//
+// Sutherland–Hodgman voi MOT mat phang (slide CG.4): duyet tung canh (P -> Q) cua da giac,
+//   "trong" = phia nhin thay: z <= -n.
+//   P trong, Q trong : xuat Q
+//   P trong, Q ngoai : xuat giao diem I
+//   P ngoai, Q trong : xuat I roi Q
+//   P ngoai, Q ngoai : khong xuat gi
+// Giao diem tren canh P + t (Q - P), chon t sao cho z = -n:
+//   t = (-n - P.z) / (Q.z - P.z)
+// Moi thuoc tinh (view, world, normal, u, v) noi suy CUNG tham so t. Noi suy tuyen tinh o day
+// la dung vi he quan sat chua qua phep chia phoi canh.
+//
+// Ket qua: 0 dinh (ca tam giac sau mat phang), 3 dinh (1 hoac 3 dinh trong), 4 dinh (2 dinh trong).
+namespace {
+
+ViewVertex lerpVertex(const ViewVertex& p, const ViewVertex& q, float t) {
+    ViewVertex r;
+    r.view = p.view + (q.view - p.view) * t;
+    r.world = p.world + (q.world - p.world) * t;
+    r.normal = normalize(p.normal + (q.normal - p.normal) * t);  // noi suy xong phai chuan hoa lai
+    r.u = p.u + (q.u - p.u) * t;
+    r.v = p.v + (q.v - p.v) * t;
+    return r;
+}
+
+}  // namespace
+
 std::vector<ViewVertex> clipNear(const ViewVertex tri[3], float nearPlane) {
-    // TODO(Hao, Sprint 3): Sutherland–Hodgman voi mot mat phang z = -near;
-    // canh cat mat phang -> noi suy moi thuoc tinh (view, world, normal, u, v) theo cung tham so.
-    // Tam thoi: bo han tam giac co dinh nam sau mat phang gan (tranh chia cho w <= 0).
-    for (int i = 0; i < 3; ++i)
-        if (tri[i].view.z > -nearPlane) return {};
-    return {tri[0], tri[1], tri[2]};
+    const float zn = -nearPlane;
+    auto inside = [zn](const ViewVertex& v) { return v.view.z <= zn; };
+
+    std::vector<ViewVertex> out;
+    out.reserve(4);
+    for (int i = 0; i < 3; ++i) {
+        const ViewVertex& p = tri[i];
+        const ViewVertex& q = tri[(i + 1) % 3];
+        const bool pIn = inside(p), qIn = inside(q);
+        if (pIn != qIn) {  // canh cat mat phang (hai dau khac phia nen Q.z != P.z)
+            const float t = (zn - p.view.z) / (q.view.z - p.view.z);
+            ViewVertex cut = lerpVertex(p, q, t);
+            cut.view.z = zn;  // gan dung bang -n, tranh sai so lam dinh lot ra sau mat phang
+            out.push_back(cut);
+        }
+        if (qIn) out.push_back(q);
+    }
+    return out;
 }

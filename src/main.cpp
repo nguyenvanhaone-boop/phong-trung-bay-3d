@@ -6,6 +6,7 @@
 //   B Back-face   Z Z-buffer   O Painter   V anh do sau   P chieu song song/phoi canh
 //   C di bo <-> orbit   W/A/S/D di chuyen   keo chuot trai: xoay   +/- phong to   Esc thoat
 //   G khung day tam (GL_LINES, chi de kiem tra camera khi phan C chua xong)
+//   X debug xen mat gan: to mau phan tam giac bi clipNear cat (trong khung day tam)
 
 #include <chrono>
 #include <cstdio>
@@ -67,25 +68,52 @@ void present() {
     glPixelZoom(1, 1);
 }
 
-// Ve canh tam giac bang GL_LINES (xem gDebugWire). Canh cat mat phang gan thi cat bot phan sau.
+// DEBUG XEN MAT GAN (phim X): trong khung day tam, da giac bi clipNear cat thi ve mau cam,
+// canh moi sinh ra nam tren mat phang gan ve mau do, duong cheo chia da giac 4 dinh thanh
+// 2 tam giac ve net mo. Dung de chung minh Sutherland–Hodgman khi thuyet trinh: di sat vao buc.
+bool gDebugClip = false;
+int gClippedPolys = 0;  // so tam giac bi cat (khong tinh tam giac bi bo han) trong khung hinh vua ve
+
+// Ve khung day bang GL_LINES (xem gDebugWire). Moi tam giac di qua clipNear cua phan B,
+// nen day cung la cach kiem tra truc quan ham xen.
 void drawDebugWire() {
     const Mat4 view = gCamera.viewMatrix();
     const Mat4 proj = gCamera.projectionMatrix(static_cast<float>(gWinW) / gWinH);
     const float zn = -gCamera.nearPlane;
-    glColor3f(0.45f, 0.85f, 1.0f);
+    auto toScreen = [&](const ViewVertex& v) {
+        const Vec4 c = proj * Vec4{v.view.x, v.view.y, v.view.z, 1};
+        glVertex2f((c.x / c.w * 0.5f + 0.5f) * gWinW, (c.y / c.w * 0.5f + 0.5f) * gWinH);
+    };
+    auto onNear = [zn](const ViewVertex& v) { return v.view.z == zn; };  // clipNear gan dung z = -n
+
+    gClippedPolys = 0;
     glBegin(GL_LINES);
     for (const SceneObject& obj : gObjects) {
         const Mat4 mv = view * obj.model;
         for (const auto& t : obj.mesh.triangles) {
-            for (int e = 0; e < 3; ++e) {
-                Vec3 a = transformPoint(mv, obj.mesh.vertices[t[e]].position);
-                Vec3 b = transformPoint(mv, obj.mesh.vertices[t[(e + 1) % 3]].position);
-                if (a.z > zn && b.z > zn) continue;                       // ca canh sau lung
-                if (a.z > zn) a = b + (a - b) * ((zn - b.z) / (a.z - b.z));  // dua dau mut ve mat phang gan
-                if (b.z > zn) b = a + (b - a) * ((zn - a.z) / (b.z - a.z));
-                const Vec4 ca = proj * Vec4{a.x, a.y, a.z, 1}, cb = proj * Vec4{b.x, b.y, b.z, 1};
-                glVertex2f((ca.x / ca.w * 0.5f + 0.5f) * gWinW, (ca.y / ca.w * 0.5f + 0.5f) * gWinH);
-                glVertex2f((cb.x / cb.w * 0.5f + 0.5f) * gWinW, (cb.y / cb.w * 0.5f + 0.5f) * gWinH);
+            ViewVertex tri[3];
+            for (int k = 0; k < 3; ++k) tri[k].view = transformPoint(mv, obj.mesh.vertices[t[k]].position);
+            const std::vector<ViewVertex> poly = clipNear(tri, gCamera.nearPlane);
+            if (poly.size() < 3) continue;
+            bool cut = false;
+            for (const ViewVertex& v : poly) cut = cut || onNear(v);
+            if (cut) ++gClippedPolys;
+            const bool highlight = gDebugClip && cut;
+
+            const std::size_t n = poly.size();
+            for (std::size_t e = 0; e < n; ++e) {
+                const ViewVertex& a = poly[e];
+                const ViewVertex& b = poly[(e + 1) % n];
+                if (highlight && onNear(a) && onNear(b)) glColor3f(1.0f, 0.2f, 0.2f);  // canh tren mat phang gan
+                else if (highlight) glColor3f(1.0f, 0.6f, 0.1f);
+                else glColor3f(0.45f, 0.85f, 1.0f);
+                toScreen(a);
+                toScreen(b);
+            }
+            if (highlight && n == 4) {  // renderer chia quat: (0,1,2) va (0,2,3)
+                glColor3f(0.6f, 0.35f, 0.1f);
+                toScreen(poly[0]);
+                toScreen(poly[2]);
             }
         }
     }
@@ -119,6 +147,13 @@ void display() {
                   gCamera.mode == Camera::Mode::Walk ? "di bo" : "orbit", e.x, e.y, e.z,
                   gCamera.yaw * 180 / kPi, gCamera.pitch * 180 / kPi, gDebugWire ? " | G: tat khung day tam" : "");
     drawText(8, gWinH - 50, line3);
+    if (gDebugWire && gDebugClip) {
+        char line4[160];
+        std::snprintf(line4, sizeof line4, "X: debug xen mat gan (near = %.2f m) | %d tam giac bi cat | cam = bi cat, do = canh tren mat phang gan",
+                      gCamera.nearPlane, gClippedPolys);
+        glColor3f(1.0f, 0.6f, 0.1f);
+        drawText(8, gWinH - 66, line4);
+    }
     if (gObjects.empty()) drawText(8, gWinH - 74, "Khung code OK - canh con trong (buildRoom chua cai).");
 
     glutSwapBuffers();
@@ -172,6 +207,7 @@ void keyboard(unsigned char key, int, int) {
         case '+': case '=': gCamera.zoom(0.9f); break;
         case '-': gCamera.zoom(1.1f); break;
         case 'g': case 'G': gDebugWire = !gDebugWire; break;
+        case 'x': case 'X': gDebugClip = !gDebugClip; break;
         default: return;
     }
     glutPostRedisplay();
