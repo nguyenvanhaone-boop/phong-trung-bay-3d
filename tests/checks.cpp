@@ -1,7 +1,9 @@
 // checks.cpp — kiem tra nhanh cac thuat toan, chay bang `make check`.
 // Moi nguoi them test cho phan minh khi cai xong thuat toan (bo comment cac dong "SAU KHI CAI").
 #include <cmath>
+#include <algorithm>
 #include <cstdio>
+#include <sstream>
 #include <string>
 #include <algorithm>
 #include <limits>
@@ -11,6 +13,7 @@
 #include "mesh.hpp"
 #include "modeling/modeling.hpp"
 #include "render/render.hpp"
+#include "scene/obj_loader.hpp"
 #include "scene/scene.hpp"
 #include "platform/frame_counter.hpp"
 
@@ -371,6 +374,74 @@ int main() {
 
     checkDisplay();
     checkScanline();
+    {
+        // Nap .obj (DHMTPTB3-42).
+        auto parse = [](const std::string& text, Mesh& m, std::string& err) {
+            std::istringstream in(text);
+            return parseObj(in, m, err);
+        };
+        Mesh m;
+        std::string err;
+
+        // Tu giac "v/vt/vn" -> 2 tam giac, 4 dinh; uv va phap tuyen doc dung.
+        const char* quad =
+            "# hinh vuong\n"
+            "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\n"
+            "vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\n"
+            "vn 0 0 2\n"                       // chua chuan hoa: bo doc phai chuan hoa
+            "g mat\nusemtl gom\ns off\n"       // lenh khong ho tro: bo qua
+            "f 1/1/1 2/2/1 3/3/1 4/4/1\r\n";   // ket thuc dong kieu Windows
+        expect(parse(quad, m, err) && m.triangles.size() == 2 && m.vertices.size() == 4, "obj: tu giac -> 2 tam giac, 4 dinh");
+        expect(m.vertices.size() == 4 && near(m.vertices[2].normal, {0, 0, 1}) && m.vertices[2].u == 1 && m.vertices[2].v == 1,
+               "obj: doc vt, vn (da chuan hoa)");
+        expect(m.triangles.size() == 2 && dot(faceNormal(m, m.triangles[0]), {0, 0, 1}) > 0, "obj: giu chieu nguoc kim dong ho");
+
+        // Chi so am va kieu "v//vn"; cung vi tri nhung khac vn -> 2 Vertex rieng.
+        const char* neg =
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 0 1\nvn 0 0 -1\n"
+            "f -3//-2 -2//-2 -1//-2\n"
+            "f 1//2 3//2 2//2\n";
+        expect(parse(neg, m, err) && m.triangles.size() == 2 && m.vertices.size() == 6, "obj: chi so am, v//vn, tach dinh khac vn");
+
+        // Khong co vn: tinh phap tuyen tu cac mat. Hop lap phuong 8 dinh -> phap tuyen dinh = huong cheo ra ngoai.
+        const char* cube =
+            "v -1 -1 -1\nv 1 -1 -1\nv 1 1 -1\nv -1 1 -1\nv -1 -1 1\nv 1 -1 1\nv 1 1 1\nv -1 1 1\n"
+            "f 5 6 7 8\nf 2 1 4 3\nf 1 5 8 4\nf 6 2 3 7\nf 8 7 3 4\nf 1 2 6 5\n";
+        bool cubeOk = parse(cube, m, err) && m.vertices.size() == 8 && m.triangles.size() == 12 && validate(m, err);
+        for (const Vertex& v : m.vertices) cubeOk = cubeOk && near(v.normal, normalize(v.position), 1e-3f);
+        expect(cubeOk, "obj: khong co vn -> phap tuyen dinh trung binh cac mat, huong ra ngoai");
+
+        // File sai: bao loi kem so dong, khong crash.
+        expect(!parse("v 0 0 0\nv 1 0 0\nf 1 2 3\n", m, err) && err.find("dong 3") == 0, "obj: chi so ngoai pham vi -> loi o dong 3");
+        expect(!parse("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2\n", m, err), "obj: mat 2 dinh -> loi");
+        expect(!parse("v 0 0\n", m, err), "obj: v thieu toa do -> loi");
+        expect(!parse("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 x 3\n", m, err), "obj: chi so khong phai so -> loi");
+        expect(!parse("v 0 0 0\n", m, err), "obj: khong co mat -> loi");
+        expect(!loadObj("khong/ton/tai.obj", m, err), "obj: file khong ton tai -> loi");
+
+        // Am tra Utah (chi co v va f, 6320 tam giac).
+        Mesh tea;
+        const bool teaOk = loadObj("assets/teapot.obj", tea, err);
+        expect(teaOk && tea.name == "teapot" && tea.triangles.size() == 6320 && validate(tea, err), "obj: nap am tra Utah, 6320 tam giac");
+        if (teaOk) {
+            fitToHeight(tea, 0.45f);
+            float lo = 1e9f, hi = -1e9f, volume = 0;
+            bool unit = true;
+            for (const Vertex& v : tea.vertices) {
+                lo = std::min(lo, v.position.y); hi = std::max(hi, v.position.y);
+                unit = unit && std::fabs(length(v.normal) - 1) < 1e-3f;
+            }
+            for (const auto& t : tea.triangles)  // the tich co dau > 0 <=> mat huong ra ngoai
+                volume += dot(tea.vertices[t[0]].position, cross(tea.vertices[t[1]].position, tea.vertices[t[2]].position)) / 6;
+            expect(std::fabs(lo) < 1e-5f && std::fabs(hi - 0.45f) < 1e-5f, "obj: fitToHeight -> day y = 0, cao 0,45 m");
+            expect(unit, "obj: moi phap tuyen dinh do dai 1");
+            expect(volume > 0, "obj: am tra dung chieu dinh (phap tuyen ra ngoai)");
+        }
+        const std::vector<SceneObject> room = buildRoom("assets/teapot.obj");
+        expect(room.size() == 15 && room.back().mesh.name == "teapot", "phong: them buc giua + am tra");
+        std::string roomErr;
+        expect(buildRoom("khong/co.obj", &roomErr).size() == 13 && !roomErr.empty(), "phong: .obj loi -> bo qua, bao ly do");
+    }
 
     std::printf("%d dung, %d sai\n", gPass, gFail);
     return gFail == 0 ? 0 : 1;

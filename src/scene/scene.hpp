@@ -1,5 +1,6 @@
 #pragma once
 // PHAN B — CANH VA CAMERA (Hao). Slide CG.4, Lab 04.
+#include <string>
 #include <vector>
 
 #include "mesh.hpp"
@@ -49,8 +50,10 @@ Mesh makeBox(Vec3 half, const Material& material, bool inward = false, unsigned 
 
 // Dung phong trung bay: san, tuong, tran, 5 buc va cac vat.
 // Thu tu: kRoomShellCount mat phong (san, tuong, tran), roi tung cap (buc, vat).
+// objPath khac rong: nap them file .obj, dat len buc thu 6 o giua phong (nap loi thi bo qua,
+// ghi ly do vao objError neu co).
 constexpr int kRoomShellCount = 3;
-std::vector<SceneObject> buildRoom();
+std::vector<SceneObject> buildRoom(const std::string& objPath = "", std::string* objError = nullptr);
 
 // ---- Chon vat bang tia (Sprint 4, DHMTPTB3-36) ----
 // Ma tran nghich dao 4x4 (Gauss–Jordan). Tra ve false neu ma tran suy bien.

@@ -362,7 +362,12 @@ int main(int argc, char** argv) {
     glutCreateWindow("Phong trung bay 3D");
 
     gFb.resize(960, 540);
-    gObjects = buildRoom();
+    // Vat o buc giua: file .obj truyen vao dong lenh, mac dinh am tra Utah.
+    //   ./build/phong_trung_bay duong/dan/vat.obj
+    const std::string objPath = argc > 1 ? argv[1] : "assets/teapot.obj";
+    std::string objError;
+    gObjects = buildRoom(objPath, &objError);
+    if (!objError.empty()) std::fprintf(stderr, "Khong nap duoc .obj: %s\n", objError.c_str());
 
     glutDisplayFunc(display);
     glutReshapeFunc(reshape);
