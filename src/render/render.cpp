@@ -19,8 +19,28 @@ bool isBackFace(const ScreenVertex tri[3]) {
     return false;
 }
 
+void interpolationWeights(const ScreenVertex tri[3], float px, float py, bool perspective, float w[3]) {
+    // Toa do trong tam tren man hinh: ti so dien tich tam giac con / dien tich ca tam giac.
+    const double x0 = tri[0].x, y0 = tri[0].y;
+    const double e1x = double(tri[1].x) - x0, e1y = double(tri[1].y) - y0;
+    const double e2x = double(tri[2].x) - x0, e2y = double(tri[2].y) - y0;
+    const double area = e1x * e2y - e1y * e2x;
+    if (area == 0.0) { w[0] = 1; w[1] = w[2] = 0; return; }
+    const double dx = px - x0, dy = py - y0;
+    const double b1 = (dx * e2y - dy * e2x) / area;
+    const double b2 = (e1x * dy - e1y * dx) / area;
+    double b[3] = {1 - b1 - b2, b1, b2};
+    if (perspective) {
+        double sum = 0;
+        for (int i = 0; i < 3; ++i) { b[i] /= std::max(double(tri[i].z), 1e-6); sum += b[i]; }
+        for (double& bi : b) bi /= sum;
+    }
+    for (int i = 0; i < 3; ++i) w[i] = static_cast<float>(b[i]);
+}
+
 void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext& ctx, const RenderSettings& s) {
-    (void)ctx;
+    const Texture* texture = (s.texture && ctx.material && ctx.material->texture) ? ctx.material->texture.get() : nullptr;
+    const bool perspective = s.perspectiveCorrect && ctx.perspective;
     if (fb.width <= 0 || fb.height <= 0 || s.shading == ShadingMode::Wireframe) return;
     for (int vertex = 0; vertex < 3; ++vertex)
         if (!std::isfinite(tri[vertex].x) || !std::isfinite(tri[vertex].y)) return;
@@ -45,8 +65,17 @@ void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext
         for (int row = firstRow; row < endRow; ++row) {
             const int firstColumn = static_cast<int>(std::clamp(std::ceil(left - 0.5), 0.0, double(fb.width)));
             const int endColumn = static_cast<int>(std::clamp(std::ceil(right - 0.5), 0.0, double(fb.width)));
-            for (int column = firstColumn; column < endColumn; ++column)
-                fb.setPixel(column, row, tri[0].color);
+            for (int column = firstColumn; column < endColumn; ++column) {
+                Vec3 color = tri[0].color;
+                if (texture) {  // Sprint 5: nhan mau voi texel tai (u, v) noi suy o tam pixel
+                    float w[3];
+                    interpolationWeights(tri, column + 0.5f, row + 0.5f, perspective, w);
+                    const float u = w[0] * tri[0].u + w[1] * tri[1].u + w[2] * tri[2].u;
+                    const float v = w[0] * tri[0].v + w[1] * tri[1].v + w[2] * tri[2].v;
+                    color = mul(color, texture->sample(u, v));
+                }
+                fb.setPixel(column, row, color);
+            }
             left += leftStep;
             right += rightStep;
         }
@@ -132,6 +161,7 @@ void renderScene(Framebuffer& fb, const std::vector<SceneObject>& objects, const
     }
     ShadeContext ctx;
     ctx.lights = &lights; ctx.eye = eye;
+    ctx.perspective = camera.projection == Projection::Perspective;
     for (Pending& p : queue) {
         ctx.material = p.mat;
         p.v[0].color = p.mat->kd;

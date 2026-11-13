@@ -8,6 +8,7 @@
 //   G khung day tam (GL_LINES, chi de kiem tra camera khi phan C chua xong)
 //   Click chuot trai (khong keo): chon vat bang tia, orbit quanh vat, hien bang thong tin
 //   X debug xen mat gan: to mau phan tam giac bi clipNear cat (trong khung day tam)
+//   U bat/tat texture   I noi suy texture dung phoi canh <-> tuyen tinh tren man hinh (de so sanh)
 
 #include <algorithm>
 #include <chrono>
@@ -212,9 +213,10 @@ void display() {
     if (!gRenderDemo && gDebugWire) drawDebugWire();
 
     char line1[160], line2[160];
-    std::snprintf(line1, sizeof line1, "%.0f FPS | %s | Back-face %s | %s | %s", gFrameCounter.fps(), shadingName(gSettings.shading),
+    std::snprintf(line1, sizeof line1, "%.0f FPS | %s | Back-face %s | %s | %s | texture %s", gFrameCounter.fps(), shadingName(gSettings.shading),
                   gSettings.backFace ? "bat" : "tat", gSettings.painter ? "Painter" : (gSettings.zBuffer ? "Z-buffer" : "khong khu"),
-                  gCamera.projection == Projection::Perspective ? "phoi canh" : "song song");
+                  gCamera.projection == Projection::Perspective ? "phoi canh" : "song song",
+                  !gSettings.texture ? "tat" : (gSettings.perspectiveCorrect ? "dung phoi canh" : "tuyen tinh (SAI)"));
     if (gRenderDemo)
         std::snprintf(line1, sizeof line1, "%.0f FPS | Demo scanline | Flat color | No depth test | T: scene", gFrameCounter.fps());
     std::snprintf(line2, sizeof line2, "tam giac: %d vao, %d bo (back-face), %d ve | bien doi %.1f ms, to %.1f ms",
@@ -301,6 +303,8 @@ void keyboard(unsigned char key, int, int) {
         case '-': gCamera.zoom(1.1f); break;
         case 'g': case 'G': gDebugWire = !gDebugWire; break;
         case 'x': case 'X': gDebugClip = !gDebugClip; break;
+        case 'u': case 'U': gSettings.texture = !gSettings.texture; break;
+        case 'i': case 'I': gSettings.perspectiveCorrect = !gSettings.perspectiveCorrect; break;
         default: return;
     }
     glutPostRedisplay();

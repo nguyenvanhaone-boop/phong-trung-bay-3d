@@ -11,10 +11,12 @@
 //   - (u, v) trong [0, 1], dung cho texture. Mat tron xoay: u = goc quay, v = vi tri tren profile.
 
 #include <array>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "math3d.hpp"
+#include "texture.hpp"
 
 struct Vertex {
     Vec3 position;
@@ -28,6 +30,9 @@ struct Material {
     Vec3 kd{0.8f, 0.8f, 0.8f};      // he so khuech tan (diffuse) = mau nen
     Vec3 ks{0.5f, 0.5f, 0.5f};      // he so phan xa guong (specular)
     float shininess = 64.0f;        // so mu n trong cong thuc Phong
+    // Texture (Sprint 5, DHMTPTB3-41): khac null thi mau nen kd duoc nhan voi texel tai (u, v).
+    // shared_ptr vi nhieu vat co the dung chung mot anh, va Material duoc sao chep theo gia tri.
+    std::shared_ptr<const Texture> texture;
 };
 
 struct Mesh {

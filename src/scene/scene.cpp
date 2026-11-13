@@ -3,9 +3,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 #include "modeling/modeling.hpp"
 #include "obj_loader.hpp"
+#include "texture_loader.hpp"
 
 // ============================================================================
 // 1. MA TRAN QUAN SAT (look-at) — slide CG.4 "He quan sat"
@@ -187,6 +189,20 @@ Mesh makeBox(Vec3 half, const Material& material, bool inward, unsigned faces) {
 // ============================================================================
 namespace {
 
+// Gan texture cho vat lieu (DHMTPTB3-41). Anh nhan voi kd, nen khi co anh dat kd gan trang
+// de mau lay tu anh; khong nap duoc anh thi giu mau kd cu (canh van dung, chi khong co van).
+void attachTexture(Material& m, const char* path) {
+    std::string err;
+    std::shared_ptr<const Texture> tex = loadTexture(path, err);
+    if (!tex) {
+        std::fprintf(stderr, "Khong nap duoc texture %s\n", err.c_str());
+        return;
+    }
+    m.texture = std::move(tex);
+    m.kd = {0.95f, 0.95f, 0.95f};
+    m.ka = m.kd * 0.15f;
+}
+
 Material mat(const char* name, Vec3 kd, Vec3 ks, float shininess) {
     Material m;
     m.name = name;
@@ -207,10 +223,12 @@ SceneObject place(Mesh mesh, Vec3 position, float yawDeg = 0) {
 }  // namespace
 
 std::vector<SceneObject> buildRoom(const std::string& objPath, std::string* objError) {
-    const Material floorMat = mat("san go", {0.55f, 0.38f, 0.24f}, {0.15f, 0.15f, 0.15f}, 16);
+    Material floorMat = mat("san go", {0.55f, 0.38f, 0.24f}, {0.15f, 0.15f, 0.15f}, 16);
+    attachTexture(floorMat, "assets/textures/san_go.png");
     const Material wallMat = mat("tuong", {0.85f, 0.83f, 0.78f}, {0.02f, 0.02f, 0.02f}, 4);
     const Material ceilMat = mat("tran", {0.92f, 0.92f, 0.92f}, {0, 0, 0}, 1);
-    const Material standMat = mat("buc da", {0.62f, 0.62f, 0.66f}, {0.2f, 0.2f, 0.2f}, 24);
+    Material standMat = mat("buc da", {0.62f, 0.62f, 0.66f}, {0.2f, 0.2f, 0.2f}, 24);
+    attachTexture(standMat, "assets/textures/da_cam_thach.png");
 
     // Vat lieu cho vat trung bay (xem bang vat lieu trong tai lieu nghien cuu).
     const Material exhibitMats[5] = {
