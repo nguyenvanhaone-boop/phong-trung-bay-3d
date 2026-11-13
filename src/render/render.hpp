@@ -36,6 +36,9 @@ void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext
 // Ve doan thang bang Bresenham (Lab 01) — Khang cai, dung cho che do khung day.
 void drawLineBresenham(Framebuffer& fb, int x0, int y0, int x1, int y1, Vec3 color);
 
+// Cat doan thang theo khung [0, w-1] x [0, h-1] (Liang–Barsky). false = nam ngoai hoan toan.
+bool clipLineToRect(float& ax, float& ay, float& bx, float& by, float w, float h);
+
 // Ve ca canh vao framebuffer. Thu tu: bien doi -> xen mat gan -> chieu -> Back-face -> Painter/Z-buffer -> to.
 void renderScene(Framebuffer& fb, const std::vector<SceneObject>& objects, const Camera& camera,
                  const std::vector<Light>& lights, const RenderSettings& settings, FrameStats& stats);

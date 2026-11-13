@@ -64,8 +64,9 @@ không phụ thuộc vào Mesh/camera chưa hoàn thiện. Phím `T` chuyển de
 | Kéo chuột trái | Xoay góc nhìn |
 | Click chuột trái | Chọn vật bằng tia: orbit quanh vật, hiện tên, số tam giác, vật liệu |
 | + / -, con lăn chuột | Phóng to / thu nhỏ (orbit); khi đi bộ con lăn để đi tới/lùi |
-| G | Khung dây tạm bằng GL_LINES (chỉ để kiểm tra camera khi phần C chưa xong) |
+| G | Khung dây phủ bằng GL_LINES (dùng cùng phím X để xem phần bị xén mặt gần) |
 | X | Debug xén mặt gần: tô màu cam phần tam giác bị cắt, đỏ là cạnh nằm trên mặt phẳng gần |
+| K | Cảnh quả cầu xuyên tấm phẳng (bấm O để thấy Painter vẽ sai) ↔ phòng trưng bày |
 | U | Bật/tắt texture (sàn gỗ, bục đá) |
 | I | Nội suy texture đúng phối cảnh ↔ tuyến tính trên màn hình (để thấy sàn bị méo khi nội suy sai) |
 | Esc | Thoát |

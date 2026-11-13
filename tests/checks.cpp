@@ -711,6 +711,87 @@ int main() {
         std::printf("  vet sang giua mat: Gouraud %d, Phong %d (0-255)\n", gouraudC, phongC);
     }
 
+    {
+        // Bresenham (DHMTPTB3-35): du 8 huong, so pixel = max(|dx|, |dy|) + 1, 2 dau mut duoc to,
+        // cac pixel lien tiep ke nhau (8-lien thong), lech khoi duong thang that < 0,5 pixel.
+        Framebuffer fb;
+        fb.resize(41, 41);
+        auto lit = [&](int x, int y) { return fb.color[fb.index(x, y) * 4] > 0; };
+        bool allOk = true;
+        const int ends[8][2] = {{20, 7}, {7, 20}, {-7, 20}, {-20, 7}, {-20, -7}, {-7, -20}, {7, -20}, {20, -7}};
+        for (const auto& e : ends) {
+            fb.clear({0, 0, 0});
+            const int x0 = 20, y0 = 20, x1 = 20 + e[0] / 1, y1 = 20 + e[1] / 1;
+            drawLineBresenham(fb, x0, y0, x1, y1, {1, 1, 1});
+            int count = 0;
+            float worst = 0;
+            for (int y = 0; y < 41; ++y)
+                for (int x = 0; x < 41; ++x)
+                    if (lit(x, y)) {
+                        ++count;
+                        // khoang cach tu tam pixel toi duong thang that
+                        const float dx = float(x1 - x0), dy = float(y1 - y0);
+                        worst = std::max(worst, std::fabs(dy * (x - x0) - dx * (y - y0)) / std::sqrt(dx * dx + dy * dy));
+                    }
+            allOk = allOk && count == std::max(std::abs(e[0]), std::abs(e[1])) + 1 && lit(x0, y0) && lit(x1, y1) && worst <= 0.5f + 1e-4f;
+        }
+        expect(allOk, "Bresenham: 8 huong, dung so pixel, qua 2 dau mut, lech < 0,5 pixel");
+        fb.clear({0, 0, 0});
+        drawLineBresenham(fb, 3, 5, 3, 5, {1, 1, 1});
+        expect(lit(3, 5), "Bresenham: doan suy bien thanh 1 diem");
+
+        // Liang–Barsky: doan trong khung giu nguyen, doan cat khung bi cat dung bien, doan ngoai bi bo.
+        float ax = 5, ay = 5, bx = 30, by = 20;
+        expect(clipLineToRect(ax, ay, bx, by, 41, 41) && ax == 5 && bx == 30, "Liang-Barsky: doan nam trong khung giu nguyen");
+        ax = -1e6f; ay = 20; bx = 1e6f; by = 20;
+        expect(clipLineToRect(ax, ay, bx, by, 41, 41) && std::fabs(ax) < 1e-2f && std::fabs(bx - 40) < 1e-2f && ay == 20,
+               "Liang-Barsky: toa do hang trieu pixel bi cat ve [0, 40]");
+        ax = -5; ay = -5; bx = -1; by = 30;
+        expect(!clipLineToRect(ax, ay, bx, by, 41, 41), "Liang-Barsky: doan nam ngoai khung -> bo");
+    }
+    {
+        // Painter (DHMTPTB3-38).
+        auto quad = [](float z, Vec3 kd) {
+            SceneObject o;
+            o.mesh.vertices = {{{-1, -1, z}, {0, 0, 1}}, {{1, -1, z}, {0, 0, 1}}, {{1, 1, z}, {0, 0, 1}}, {{-1, 1, z}, {0, 0, 1}}};
+            o.mesh.triangles = {{0, 1, 2}, {0, 2, 3}};
+            o.mesh.material.kd = kd; o.mesh.material.ka = {0, 0, 0}; o.mesh.material.ks = {0, 0, 0};
+            return o;
+        };
+        Framebuffer fb;
+        fb.resize(160, 90);
+        Camera c0;
+        c0.eye = {0, 0, 2};
+        FrameStats st;
+        RenderSettings painter;
+        painter.painter = true;
+        // Danh sach: vat gan (do) truoc, vat xa (xanh) sau. Painter phai tu sap xep lai.
+        fb.clear({0, 0, 0});
+        renderScene(fb, {quad(-1, {1, 0, 0}), quad(-3, {0, 0, 1})}, c0, {Light{{0, 0, 5}, {1, 1, 1}}}, painter, st);
+        const std::size_t ci = fb.index(80, 45) * 4;
+        expect(fb.color[ci] > 100 && fb.color[ci + 2] < 10 && std::isinf(fb.depthAt(80, 45)),
+               "Painter: sap xep xa -> gan, vat gan che vat xa ma khong dung Z-buffer");
+
+        // Canh qua cau xuyen tam phang: Painter ve khac han Z-buffer (sai), Z-buffer la anh dung.
+        fb.resize(320, 180);
+        const std::vector<SceneObject> demo = buildPainterDemo();
+        expect(demo.size() == 3, "canh Painter: qua cau, tam phang, san");
+        Camera c;
+        c.mode = Camera::Mode::Orbit; c.target = kPainterDemoCenter; c.orbitRadius = 2.6f; c.orbitTheta = 0.9f; c.orbitPhi = 0.3f;
+        const std::vector<Light> L = {Light{{1.5f, 3, 2.5f}, {1, 1, 1}}};
+        RenderSettings z;
+        fb.clear({0, 0, 0});
+        renderScene(fb, demo, c, L, z, st);
+        const std::vector<std::uint8_t> correct = fb.color;
+        fb.clear({0, 0, 0});
+        renderScene(fb, demo, c, L, painter, st);
+        int diff = 0;
+        for (std::size_t i = 0; i < correct.size(); i += 4)
+            if (std::abs(int(correct[i]) - int(fb.color[i])) + std::abs(int(correct[i + 2]) - int(fb.color[i + 2])) > 60) ++diff;
+        expect(diff > 500, "canh Painter: hai vat cat nhau -> Painter ve sai nhieu pixel so voi Z-buffer");
+        std::printf("  canh Painter: %d pixel khac Z-buffer\n", diff);
+    }
+
     std::printf("%d dung, %d sai\n", gPass, gFail);
     return gFail == 0 ? 0 : 1;
 }

@@ -8,6 +8,7 @@
 //   G khung day tam (GL_LINES, chi de kiem tra camera khi phan C chua xong)
 //   Click chuot trai (khong keo): chon vat bang tia, orbit quanh vat, hien bang thong tin
 //   X debug xen mat gan: to mau phan tam giac bi clipNear cat (trong khung day tam)
+//   K canh minh hoa Painter (qua cau xuyen tam phang) <-> phong trung bay
 //   U bat/tat texture   I noi suy texture dung phoi canh <-> tuyen tinh tren man hinh (de so sanh)
 
 #include <algorithm>
@@ -41,7 +42,11 @@ bool gRenderDemo = false;
 int gMouseX = 0, gMouseY = 0;
 int gDownX = 0, gDownY = 0;  // vi tri bam chuot trai: tha ra gan cho cu = click (chon vat), xa = keo (xoay)
 bool gDragging = false;
-int gSelected = -1;          // vat dang chon (chi so trong gObjects), -1 = chua chon
+int gSelected = -1;
+// Phim K: doi giua phong trung bay va canh minh hoa Painter (qua cau xuyen tam phang).
+std::vector<SceneObject> gOtherScene;
+bool gPainterDemo = false;
+Camera gOtherCamera;          // vat dang chon (chi so trong gObjects), -1 = chua chon
 
 // CHE DO XEM TAM (phim G): ve khung day bang GL_LINES, chi de kiem tra camera va phong
 // trong luc phan C (Lam) chua co bo to tam giac. Dung chung ma tran view/projection tu cai
@@ -241,6 +246,11 @@ void display() {
     }
     if (gObjects.empty()) drawText(8, gWinH - 74, "Canh con trong (buildRoom chua cai). Nhan T: demo scanline.");
     drawSelectionPanel();
+    if (gPainterDemo) {
+        glColor3f(1.0f, 0.9f, 0.3f);
+        drawText(8, gWinH - 82, gSettings.painter ? "Canh Painter: O dang BAT -> tam phang va qua cau ve sai thu tu (cat nhau). O: ve lai bang Z-buffer | K: ve phong"
+                                                  : "Canh Painter: dang dung Z-buffer (dung). Bam O de thay Painter sai | K: ve phong");
+    }
     }
 
     glutSwapBuffers();
@@ -304,6 +314,20 @@ void keyboard(unsigned char key, int, int) {
         case '-': gCamera.zoom(1.1f); break;
         case 'g': case 'G': gDebugWire = !gDebugWire; break;
         case 'x': case 'X': gDebugClip = !gDebugClip; break;
+        case 'k': case 'K':
+            if (gOtherScene.empty()) {  // lan dau: dung canh Painter, camera orbit nhin xien
+                gOtherScene = buildPainterDemo();
+                gOtherCamera.mode = Camera::Mode::Orbit;
+                gOtherCamera.target = kPainterDemoCenter;
+                gOtherCamera.orbitRadius = 2.6f;
+                gOtherCamera.orbitTheta = 0.5f;
+                gOtherCamera.orbitPhi = 0.4f;
+            }
+            std::swap(gObjects, gOtherScene);
+            std::swap(gCamera, gOtherCamera);
+            gPainterDemo = !gPainterDemo;
+            gSelected = -1;
+            break;
         case 'u': case 'U': gSettings.texture = !gSettings.texture; break;
         case 'i': case 'I': gSettings.perspectiveCorrect = !gSettings.perspectiveCorrect; break;
         default: return;
