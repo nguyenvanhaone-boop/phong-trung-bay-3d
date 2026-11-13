@@ -182,14 +182,15 @@ static void checkScanline() {
     object.mesh.material.kd = {0.25f, 0.75f, 0.5f};
     settings.backFace = false;
     FrameStats stats;
-    std::vector<std::uint8_t> flatScene;
+    // Gouraud, Phong da cai (DHMTPTB3-25, -31): mau khac Flat nhung phai to DUNG cung tap pixel.
+    int flatCoverage = -1;
     for (ShadingMode mode : {ShadingMode::Flat, ShadingMode::Gouraud, ShadingMode::Phong}) {
         settings.shading = mode;
         framebuffer.clear({0, 0, 0});
         renderScene(framebuffer, {object}, Camera{}, {Light{}}, settings, stats);
-        if (mode == ShadingMode::Flat) flatScene = framebuffer.color;
-        expect(coloredPixels(framebuffer) > 0 && framebuffer.color == flatScene,
-               "renderScene khoi tao mau cho ca Flat/Gouraud/Phong fallback");
+        if (mode == ShadingMode::Flat) flatCoverage = coloredPixels(framebuffer);
+        expect(coloredPixels(framebuffer) > 0 && coloredPixels(framebuffer) == flatCoverage,
+               "renderScene: Flat/Gouraud/Phong to cung tap pixel");
     }
 }
 
@@ -536,6 +537,109 @@ int main() {
         const std::vector<SceneObject> room = buildRoom();
         expect(room[0].mesh.material.texture && room[kRoomShellCount].mesh.material.texture && !room[1].mesh.material.texture,
                "phong: san va buc co texture, tuong khong");
+    }
+
+    {
+        // Chieu sang Phong (DHMTPTB3-24).
+        Material m;
+        m.ka = {0.1f, 0.1f, 0.1f}; m.kd = {0.5f, 0.5f, 0.5f}; m.ks = {0.4f, 0.4f, 0.4f}; m.shininess = 8;
+        const std::vector<Light> above = {Light{{0, 5, 0}, {1, 1, 1}}};
+        const Vec3 P{0, 0, 0}, N{0, 1, 0};
+        // Den va mat cung thang dung tren diem: N.L = 1, R = V -> I = ka + kd + ks.
+        expect(near(shadePhong(P, N, {0, 3, 0}, above, m, false), {1.0f, 1.0f, 1.0f}), "Phong: den va mat thang dung -> ka + kd + ks");
+        // Den o goc 60 do: N.L = 0,5; mat o phia doi dien phan xa -> R.V = 1.
+        const Vec3 L60 = {std::sin(radians(60)) * 5, std::cos(radians(60)) * 5, 0};
+        const Vec3 eyeMirror = {-L60.x, L60.y, 0};
+        const Vec3 i60 = shadePhong(P, N, eyeMirror, {Light{L60, {1, 1, 1}}}, m, false);
+        expect(std::fabs(i60.x - (0.1f + 0.5f * 0.5f + 0.4f)) < 1e-4f, "Phong: N.L = cos 60 = 0,5, mat dung huong phan xa");
+        // Mat lech khoi huong phan xa -> vet sang giam theo mu n.
+        const Vec3 iOff = shadePhong(P, N, {0, 3, 0}, {Light{L60, {1, 1, 1}}}, m, false);
+        const float rv = std::cos(radians(60));  // goc giua R va V = 60 do
+        expect(std::fabs(iOff.x - (0.1f + 0.25f + 0.4f * std::pow(rv, 8.0f))) < 1e-4f, "Phong: specular = ks * (R.V)^n");
+        // Blinn: H nam giua L va V -> N.H = cos 30 do khi L lech 60 do, V thang dung.
+        const Vec3 iBlinn = shadePhong(P, N, {0, 3, 0}, {Light{L60, {1, 1, 1}}}, m, true);
+        expect(std::fabs(iBlinn.x - (0.1f + 0.25f + 0.4f * std::pow(std::cos(radians(30)), 8.0f))) < 1e-4f, "Blinn-Phong: dung N.H");
+        // Den sau mat: chi con ka.
+        expect(near(shadePhong(P, N, {0, 3, 0}, {Light{{0, -5, 0}, {1, 1, 1}}}, m, false), m.ka), "Phong: den sau mat -> chi con moi truong");
+        // Hai den cong lai, mau den nhan tung kenh.
+        const Vec3 two = shadePhong(P, N, {0, 3, 0}, {Light{{0, 5, 0}, {1, 0, 0}}, Light{{0, 5, 0}, {0, 0, 1}}}, m, false);
+        expect(near(two, {1.0f, 0.1f, 1.0f}), "Phong: nhieu den cong lai, mau den nhan theo kenh");
+
+        // Back-face (DHMTPTB3-37): nguoc chieu kim dong ho trong the gioi -> tren man hinh (y xuong) la cung chieu.
+        ScreenVertex front[3], back[3];
+        front[0].x = 0; front[0].y = 10; front[1].x = 10; front[1].y = 10; front[2].x = 0; front[2].y = 0;
+        back[0] = front[0]; back[1] = front[2]; back[2] = front[1];
+        expect(!isBackFace(front) && isBackFace(back), "Back-face: dau dien tich tren man hinh");
+        // Hop nhin tu ngoai: dung mot nua so mat bi bo (6 trong 12), phong nhin tu trong: khong bo mat nao cua tuong.
+        Framebuffer fb;
+        fb.resize(160, 90);
+        SceneObject box;
+        box.mesh = makeBox({0.5f, 0.5f, 0.5f}, Material{});
+        box.model = translate({0.3f, 0.2f, 0}) * rotateY(radians(30));
+        Camera cam;
+        cam.eye = {0, 0.8f, 3};
+        cam.pitch = radians(-12);
+        RenderSettings rs;
+        FrameStats st;
+        renderScene(fb, {box}, cam, {Light{}}, rs, st);
+        expect(st.culledBackFace == 6, "Back-face: hop nhin tu ngoai bo dung 6/12 tam giac");
+
+        // Z-buffer (DHMTPTB3-32): hai tam giac chong nhau, ve XA SAU cung -> van bi che nho Z-buffer.
+        auto quad = [](float z, Vec3 kd) {
+            SceneObject o;
+            o.mesh.vertices = {{{-1, -1, z}, {0, 0, 1}}, {{1, -1, z}, {0, 0, 1}}, {{1, 1, z}, {0, 0, 1}}, {{-1, 1, z}, {0, 0, 1}}};
+            o.mesh.triangles = {{0, 1, 2}, {0, 2, 3}};
+            o.mesh.material.kd = kd; o.mesh.material.ka = {0, 0, 0}; o.mesh.material.ks = {0, 0, 0};
+            return o;
+        };
+        const std::vector<SceneObject> pair = {quad(-1, {1, 0, 0}), quad(-3, {0, 0, 1})};  // do gan, xanh xa
+        Camera c0;
+        c0.eye = {0, 0, 2};
+        auto centerColor = [&](const RenderSettings& r) {
+            fb.clear({0, 0, 0});
+            renderScene(fb, pair, c0, {Light{{0, 0, 5}, {1, 1, 1}}}, r, st);
+            const std::size_t i = fb.index(fb.width / 2, fb.height / 2) * 4;
+            return Vec3{float(fb.color[i]), float(fb.color[i + 1]), float(fb.color[i + 2])};
+        };
+        RenderSettings zOn;
+        const Vec3 cz = centerColor(zOn);
+        expect(cz.x > 100 && cz.z < 10, "Z-buffer: vat gan (do) che vat xa (xanh) du ve truoc");
+        RenderSettings zOff;
+        zOff.zBuffer = false;
+        const Vec3 cn = centerColor(zOff);
+        expect(cn.z > 100 && cn.x < 10, "tat Z-buffer: vat ve sau (xanh, xa) de len vat gan -> sai");
+        // Ve theo thu tu nguoc lai van dung khi bat Z-buffer.
+        const float zCenter = fb.depthAt(fb.width / 2, fb.height / 2);
+        expect(std::isinf(zCenter), "tat Z-buffer: khong ghi mang do sau");
+        fb.clear({0, 0, 0});
+        renderScene(fb, pair, c0, {Light{}}, zOn, st);
+        expect(std::fabs(fb.depthAt(fb.width / 2, fb.height / 2) - 3) < 1e-3f, "Z-buffer: do sau tai tam = khoang cach toi vat gan (3 m)");
+
+        // Anh do sau (phim V): gan sang hon xa, nen den.
+        RenderSettings dv;
+        dv.showDepth = true;
+        const std::vector<SceneObject> sideBySide = {quad(-1, {1, 0, 0})};
+        fb.clear({0, 0, 0});
+        renderScene(fb, sideBySide, c0, {Light{}}, dv, st);
+        const std::size_t ci = fb.index(fb.width / 2, fb.height / 2) * 4, corner = fb.index(0, 0) * 4;
+        expect(fb.color[ci] > 200 && fb.color[ci] == fb.color[ci + 1] && fb.color[corner] == 0, "anh do sau: vat sang xam, nen den");
+
+        // Gouraud vs Phong: den chieu sat tam mot mat phang lon -> Phong thay vet sang giua mat, Gouraud (chi tinh o dinh) thi khong.
+        SceneObject plane = quad(-2, {0.2f, 0.2f, 0.2f});
+        plane.mesh.material.ks = {1, 1, 1}; plane.mesh.material.shininess = 64;
+        const std::vector<Light> spot = {Light{{0, 0, 0}, {1, 1, 1}}};
+        Camera c1;
+        c1.eye = {0, 0, 0};
+        auto center = [&](ShadingMode mode) {
+            RenderSettings r;
+            r.shading = mode;
+            fb.clear({0, 0, 0});
+            renderScene(fb, {plane}, c1, spot, r, st);
+            return int(fb.color[fb.index(fb.width / 2, fb.height / 2) * 4]);
+        };
+        const int gouraudC = center(ShadingMode::Gouraud), phongC = center(ShadingMode::Phong);
+        expect(phongC > 230 && gouraudC < 120, "Phong bat duoc vet sang giua mat, Gouraud bo lo");
+        std::printf("  vet sang giua mat: Gouraud %d, Phong %d (0-255)\n", gouraudC, phongC);
     }
 
     std::printf("%d dung, %d sai\n", gPass, gFail);
