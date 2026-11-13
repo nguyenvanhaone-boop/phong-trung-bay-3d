@@ -20,7 +20,17 @@ struct ShadeContext {
     const std::vector<Light>* lights = nullptr;
     const Material* material = nullptr;
     Vec3 eye;
+    bool perspective = true;  // camera chieu phoi canh? (song song thi noi suy tuyen tinh tren man hinh da dung)
 };
+
+// Trong so noi suy tai diem (px, py) tren man hinh (Sprint 5, DHMTPTB3-41).
+// Thuoc tinh A tai diem do = w[0] A0 + w[1] A1 + w[2] A2.
+//   perspective = false: toa do trong tam (b0, b1, b2) tren man hinh -> dung cho chieu song song.
+//   perspective = true : chieu phoi canh lam "co" tam giac theo 1/z, nen noi suy tuyen tinh tren
+//                        man hinh la SAI. Noi suy A/z va 1/z (deu tuyen tinh tren man hinh) roi chia:
+//                        w_i = (b_i / z_i) / (b0/z0 + b1/z1 + b2/z2)
+// Lam co the dung lai cho Gouraud (color), Phong (normal, world) va Z-buffer.
+void interpolationWeights(const ScreenVertex tri[3], float px, float py, bool perspective, float w[3]);
 void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext& ctx, const RenderSettings& s);
 
 // Ve doan thang bang Bresenham (Lab 01) — Khang cai, dung cho che do khung day.

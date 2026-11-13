@@ -66,6 +66,8 @@ không phụ thuộc vào Mesh/camera chưa hoàn thiện. Phím `T` chuyển de
 | + / -, con lăn chuột | Phóng to / thu nhỏ (orbit); khi đi bộ con lăn để đi tới/lùi |
 | G | Khung dây tạm bằng GL_LINES (chỉ để kiểm tra camera khi phần C chưa xong) |
 | X | Debug xén mặt gần: tô màu cam phần tam giác bị cắt, đỏ là cạnh nằm trên mặt phẳng gần |
+| U | Bật/tắt texture (sàn gỗ, bục đá) |
+| I | Nội suy texture đúng phối cảnh ↔ tuyến tính trên màn hình (để thấy sàn bị méo khi nội suy sai) |
 | Esc | Thoát |
 | T | Demo scanline màu phẳng ↔ cảnh 3D |
 
@@ -101,12 +103,14 @@ git push -u origin feature/DHMTPTB3-17-bezier
 ## Cấu trúc
 
 ```
-include/        math3d, mesh, framebuffer, pipeline (dùng chung)
+include/        math3d, mesh, framebuffer, pipeline, texture (dùng chung)
 src/main.cpp    cửa sổ GLUT, phím tắt, hiện FPS
 src/modeling/   phần A
-src/scene/      phần B
+src/scene/      phần B (camera, phòng, xén, chọn vật, nạp .obj, nạp texture)
+src/third_party/ stb_image.h (nạp ảnh, public domain)
 src/render/     phần C (renderScene đã nối sẵn các bước)
 src/platform/   chọn header GLUT theo hệ điều hành
-assets/         mô hình .obj mẫu (ấm trà Utah)
+assets/         mô hình .obj mẫu (ấm trà Utah), ảnh texture
+tools/          gen_textures.py: tạo ảnh texture
 tests/          make check
 ```

@@ -14,6 +14,7 @@
 #include "modeling/modeling.hpp"
 #include "render/render.hpp"
 #include "scene/obj_loader.hpp"
+#include "scene/texture_loader.hpp"
 #include "scene/scene.hpp"
 #include "platform/frame_counter.hpp"
 
@@ -441,6 +442,100 @@ int main() {
         expect(room.size() == 15 && room.back().mesh.name == "teapot", "phong: them buc giua + am tra");
         std::string roomErr;
         expect(buildRoom("khong/co.obj", &roomErr).size() == 13 && !roomErr.empty(), "phong: .obj loi -> bo qua, bao ly do");
+    }
+    {
+        // Texture (DHMTPTB3-41).
+        // Anh 2 x 2: hang tren (v ~ 1) do, xanh la; hang duoi (v ~ 0) xanh duong, trang.
+        Texture t;
+        t.width = t.height = 2;
+        t.texels = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {1, 1, 1}};
+        expect(near(t.sample(0.25f, 0.75f), {1, 0, 0}) && near(t.sample(0.75f, 0.25f), {1, 1, 1}),
+               "texture: tam texel lay dung mau, v = 0 la hang duoi");
+        expect(near(t.sample(1.25f, 0.75f), {1, 0, 0}) && near(t.sample(-0.75f, 2.75f), {1, 0, 0}), "texture: lap lai (repeat) ngoai [0, 1]");
+        expect(near(t.sample(0.5f, 0.5f), {0.5f, 0.5f, 0.5f}), "texture: song tuyen o giua 4 texel = trung binh");
+
+        std::string err;
+        const auto wood = loadTexture("assets/textures/san_go.png", err);
+        expect(wood && wood->width == 256 && wood->height == 256, "texture: nap san_go.png 256 x 256 bang stb_image");
+        expect(!loadTexture("khong/co.png", err) && !err.empty(), "texture: file khong ton tai -> null, co ly do");
+        const auto checker = makeCheckerTexture(8, 2, {0, 0, 0}, {1, 1, 1});
+        expect(near(checker->at(0, 0), {0, 0, 0}) && near(checker->at(4, 0), {1, 1, 1}) && near(checker->at(4, 4), {0, 0, 0}),
+               "texture: anh o co");
+
+        // Trong so noi suy: canh tu dinh 0 (z = 1) toi dinh 1 (z = 3), lay trung diem TREN MAN HINH.
+        ScreenVertex tri[3];
+        tri[0].x = 0; tri[0].y = 0; tri[0].z = 1;
+        tri[1].x = 100; tri[1].y = 0; tri[1].z = 3;
+        tri[2].x = 0; tri[2].y = 100; tri[2].z = 1;
+        float w[3];
+        interpolationWeights(tri, 50, 0, false, w);
+        expect(std::fabs(w[0] - 0.5f) < 1e-5f && std::fabs(w[1] - 0.5f) < 1e-5f, "noi suy tuyen tinh: trung diem man hinh -> (0,5; 0,5)");
+        interpolationWeights(tri, 50, 0, true, w);
+        // Dinh 1 xa gap 3 nen bi "nen" lai: trung diem man hinh ung voi 1/4 duong trong 3D.
+        expect(std::fabs(w[1] - 0.25f) < 1e-5f && std::fabs(w[0] + w[1] + w[2] - 1) < 1e-5f, "noi suy phoi canh: trung diem man hinh -> 1/4 duong trong 3D");
+
+        // Kiem tra voi phep chieu that: diem P = 0,2 A + 0,3 B + 0,5 C tren san, chieu len man hinh,
+        // trong so phoi canh tai pixel cua P phai tra lai dung (0,2; 0,3; 0,5).
+        Camera cam;
+        cam.eye = {0, 1.6f, 0};
+        const int W = 960, H = 540;
+        const Mat4 V = cam.viewMatrix(), P = cam.projectionMatrix(static_cast<float>(W) / H);
+        auto toScreen = [&](Vec3 world) {
+            const Vec3 v = transformPoint(V, world);
+            const Vec4 c = P * Vec4{v.x, v.y, v.z, 1};
+            ScreenVertex s;
+            s.x = (c.x / c.w * 0.5f + 0.5f) * W;
+            s.y = (0.5f - c.y / c.w * 0.5f) * H;
+            s.z = -v.z;
+            return s;
+        };
+        const Vec3 A{-1, 0, -2}, B{1, 0, -2}, C{0, 0, -8};
+        const ScreenVertex floorTri[3] = {toScreen(A), toScreen(B), toScreen(C)};
+        const ScreenVertex at = toScreen(A * 0.2f + B * 0.3f + C * 0.5f);
+        interpolationWeights(floorTri, at.x, at.y, true, w);
+        expect(std::fabs(w[0] - 0.2f) < 1e-3f && std::fabs(w[1] - 0.3f) < 1e-3f && std::fabs(w[2] - 0.5f) < 1e-3f,
+               "noi suy phoi canh: khop toa do trong tam 3D cua diem tren san");
+        float affine[3];
+        interpolationWeights(floorTri, at.x, at.y, false, affine);
+        expect(std::fabs(affine[2] - 0.5f) > 0.05f, "noi suy tuyen tinh tren man hinh lech khoi gia tri dung (ly do can phoi canh)");
+
+        // To that: tam giac phu anh o co 2 x 2 o -> co ca o den lan o trang. Tat texture -> mot mau kd.
+        Framebuffer fb;
+        fb.resize(64, 64);
+        Material m;
+        m.texture = makeCheckerTexture(8, 2, {0, 0, 0}, {1, 1, 1});
+        ScreenVertex big[3];
+        big[0].x = 0; big[0].y = 0; big[0].z = 1; big[0].u = 0; big[0].v = 1;
+        big[1].x = 64; big[1].y = 0; big[1].z = 1; big[1].u = 1; big[1].v = 1;
+        big[2].x = 0; big[2].y = 64; big[2].z = 1; big[2].u = 0; big[2].v = 0;
+        big[0].color = {1, 1, 1};
+        ShadeContext ctx;
+        ctx.material = &m;
+        RenderSettings rs;
+        auto countDarkLight = [&](int& dark, int& light) {
+            dark = light = 0;
+            for (int y = 0; y < 64; ++y)
+                for (int x = 0; x < 64; ++x) {
+                    if (x + y >= 63) continue;  // chi dem phan trong tam giac
+                    const int r = fb.color[fb.index(x, y) * 4];
+                    if (r < 40) ++dark;
+                    if (r > 215) ++light;
+                }
+        };
+        int dark, light;
+        fb.clear({0.5f, 0.5f, 0.5f});
+        fillTriangle(fb, big, ctx, rs);
+        countDarkLight(dark, light);
+        expect(dark > 300 && light > 300, "fillTriangle + texture: hien ca o den va o trang");
+        rs.texture = false;
+        fb.clear({0.5f, 0.5f, 0.5f});
+        fillTriangle(fb, big, ctx, rs);
+        countDarkLight(dark, light);
+        expect(dark == 0 && light > 1500, "fillTriangle tat texture (phim U): chi con mau kd");
+
+        const std::vector<SceneObject> room = buildRoom();
+        expect(room[0].mesh.material.texture && room[kRoomShellCount].mesh.material.texture && !room[1].mesh.material.texture,
+               "phong: san va buc co texture, tuong khong");
     }
 
     std::printf("%d dung, %d sai\n", gPass, gFail);
