@@ -30,7 +30,8 @@ namespace {
 int gWinW = 960, gWinH = 540;
 Framebuffer gFb;
 std::vector<SceneObject> gObjects;
-std::vector<Light> gLights = {Light{}};
+// Den tran, dat TRONG phong (tran cao kRoomHeight = 3,5 m), lech ve phia nguoi xem.
+std::vector<Light> gLights = {Light{{0.0f, 2.8f, 1.0f}, {1.0f, 1.0f, 1.0f}}};
 Camera gCamera;
 RenderSettings gSettings;
 FrameStats gStats;
@@ -45,7 +46,7 @@ int gSelected = -1;          // vat dang chon (chi so trong gObjects), -1 = chua
 // CHE DO XEM TAM (phim G): ve khung day bang GL_LINES, chi de kiem tra camera va phong
 // trong luc phan C (Lam) chua co bo to tam giac. Dung chung ma tran view/projection tu cai
 // cua phan B, nen thay dung hinh la camera dung. Khi phan C xong: doi mac dinh thanh false.
-bool gDebugWire = true;
+bool gDebugWire = false;  // phan C da to duoc tam giac: mac dinh tat, bam G de bat lai
 
 // Ti le khung cua anh dang hien: khung day tam ve theo cua so, renderer ve theo framebuffer.
 float shownAspect() {
@@ -104,8 +105,8 @@ const char* shadingName(ShadingMode m) {
     switch (m) {
         case ShadingMode::Wireframe: return "Khung day";
         case ShadingMode::Flat: return "Flat";
-        case ShadingMode::Gouraud: return "Gouraud (flat fallback)";
-        case ShadingMode::Phong: return "Phong (flat fallback)";
+        case ShadingMode::Gouraud: return "Gouraud";
+        case ShadingMode::Phong: return gSettings.blinnPhong ? "Phong (Blinn)" : "Phong";
     }
     return "?";
 }

@@ -15,7 +15,7 @@ struct RenderSettings {
     bool backFace = true;     // phim B
     bool zBuffer = true;      // phim Z
     bool painter = false;     // phim O (Painter thay cho Z-buffer)
-    bool showDepth = false;   // phim D: hien mang do sau
+    bool showDepth = false;   // phim V: hien mang do sau
     bool blinnPhong = false;
     bool texture = true;             // phim U: bat/tat texture (Sprint 5)
     bool perspectiveCorrect = true;  // phim I: noi suy (u, v) dung phoi canh <-> tuyen tinh tren man hinh (de so sanh)

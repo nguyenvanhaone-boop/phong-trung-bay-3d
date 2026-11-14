@@ -1,22 +1,62 @@
-// PHAN C — HIEN THI (Lam). Ham renderScene da noi san cac buoc; cac thuat toan con TODO.
+// PHAN C — HIEN THI (Lam). Chieu sang Phong, Flat/Gouraud/Phong, Back-face, Z-buffer; Painter con TODO.
 #include "render.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 
-Vec3 shadePhong(Vec3 point, Vec3 normal, Vec3 eye, const std::vector<Light>& lights,
-                const Material& material, bool blinn) {
-    // TODO(Lam, Sprint 2): I = ka*Ia + sum[ kd*max(N.L,0) + ks*max(R.V,0)^n ] * IL
-    // (blinn: thay R.V bang N.H, H = normalize(L + V)).
-    (void)point; (void)normal; (void)eye; (void)lights; (void)blinn;
-    return material.kd;
+namespace {
+
+// Cuong do anh sang moi truong Ia (slide CG.6). Nhan voi ka cua vat lieu.
+const Vec3 kAmbient{1, 1, 1};
+
+// Phan loi cua cong thuc Phong, tach rieng he so de texture thay duoc kd, ka tung pixel
+// (khong phai sao chep ca Material, vi Material co string va shared_ptr).
+Vec3 phongTerms(Vec3 point, Vec3 normal, Vec3 eye, const std::vector<Light>& lights,
+                Vec3 ka, Vec3 kd, Vec3 ks, float shininess, bool blinn) {
+    const Vec3 N = normalize(normal);
+    const Vec3 V = normalize(eye - point);              // tu diem toi mat
+    Vec3 I = mul(ka, kAmbient);
+    for (const Light& light : lights) {
+        const Vec3 L = normalize(light.position - point);  // tu diem toi den
+        const float NL = dot(N, L);
+        if (NL <= 0) continue;                           // den nam sau mat: khong khuech tan, khong phan xa
+        float spec;
+        if (blinn) {
+            const Vec3 H = normalize(L + V);             // vecto nua goc (half-vector)
+            spec = std::max(dot(N, H), 0.0f);
+        } else {
+            const Vec3 R = N * (2 * NL) - L;             // L phan xa qua N: R = 2(N.L)N - L
+            spec = std::max(dot(R, V), 0.0f);
+        }
+        const Vec3 term = kd * NL + ks * (spec > 0 ? std::pow(spec, shininess) : 0.0f);
+        I = I + mul(term, light.color);
+    }
+    return I;
 }
 
+}  // namespace
+
+// Mo hinh chieu sang Phong (slide CG.6):
+//   I = ka*Ia + sum_den IL * [ kd * max(N.L, 0) + ks * max(R.V, 0)^n ]
+//   N: phap tuyen, L: huong toi den, V: huong toi mat, R = 2(N.L)N - L: L phan xa qua N.
+// Blinn-Phong thay R.V bang N.H voi H = normalize(L + V): re hon (khong can tinh R),
+// vet sang rong hon mot chut voi cung so mu n.
+Vec3 shadePhong(Vec3 point, Vec3 normal, Vec3 eye, const std::vector<Light>& lights,
+                const Material& material, bool blinn) {
+    return phongTerms(point, normal, eye, lights, material.ka, material.kd, material.ks, material.shininess, blinn);
+}
+
+// Back-face (slide CG.6): mat truoc co dinh xep NGUOC chieu kim dong ho khi nhin tu ngoai (mesh.hpp).
+// Tren man hinh truc y huong XUONG nen chieu bi lat: mat truoc co dien tich co dau < 0.
+//   dien tich co dau = (x1 - x0)(y2 - y0) - (y1 - y0)(x2 - x0)
+// >= 0 -> quay lung (hoac suy bien thanh doan thang) -> bo.
+// Lam tren man hinh (sau khi chieu) nen dung cho ca phoi canh lan song song.
 bool isBackFace(const ScreenVertex tri[3]) {
-    // TODO(Lam, Sprint 4): dau cua dien tich tam giac tren man hinh (hoac N.(P - E) > 0 trong he quan sat).
-    (void)tri;
-    return false;
+    const double area = (double(tri[1].x) - tri[0].x) * (double(tri[2].y) - tri[0].y)
+                      - (double(tri[1].y) - tri[0].y) * (double(tri[2].x) - tri[0].x);
+    return area >= 0;
 }
 
 void interpolationWeights(const ScreenVertex tri[3], float px, float py, bool perspective, float w[3]) {
@@ -45,6 +85,64 @@ void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext
     for (int vertex = 0; vertex < 3; ++vertex)
         if (!std::isfinite(tri[vertex].x) || !std::isfinite(tri[vertex].y)) return;
 
+    // ---- To mot pixel (Sprint 2-5) ----
+    // Moi pixel tinh toa do trong tam (b0, b1, b2) tren man hinh MOT lan, roi dung chung cho:
+    //   - Gouraud: noi suy mau tuyen tinh tren man hinh (dung nhu slide: doc canh roi theo dong).
+    //   - Z-buffer, Phong, texture: noi suy dung phoi canh, trong so p_i = (b_i / z_i) / sum(b_j / z_j)
+    //     (xem interpolationWeights). Do sau z = sum p_i z_i = 1 / sum(b_j / z_j).
+    const bool useDepth = s.zBuffer && !s.painter;                  // Painter thay cho Z-buffer
+    const bool lit = ctx.material && ctx.lights;
+    const bool phong = s.shading == ShadingMode::Phong && lit;
+    const bool gouraud = s.shading == ShadingMode::Gouraud;
+    const bool perPixel = texture || useDepth || phong || gouraud;  // Flat khong texture, khong Z: to mot mau
+    const double ox = tri[0].x, oy = tri[0].y;
+    const double e1x = double(tri[1].x) - ox, e1y = double(tri[1].y) - oy;
+    const double e2x = double(tri[2].x) - ox, e2y = double(tri[2].y) - oy;
+    const double triArea = e1x * e2y - e1y * e2x;
+    const double invArea = triArea != 0.0 ? 1.0 / triArea : 0.0;
+    double invZ[3];
+    for (int i = 0; i < 3; ++i) invZ[i] = 1.0 / std::max(double(tri[i].z), 1e-6);
+
+    const auto shadePixel = [&](int column, int row) {
+        if (!perPixel) { fb.setPixel(column, row, tri[0].color); return; }
+        const double dx = column + 0.5 - ox, dy = row + 0.5 - oy;
+        const double b1 = (dx * e2y - dy * e2x) * invArea;
+        const double b2 = (e1x * dy - e1y * dx) * invArea;
+        const double b[3] = {1 - b1 - b2, b1, b2};
+        double w[3] = {b[0], b[1], b[2]};
+        if (perspective) {
+            const double sum = b[0] * invZ[0] + b[1] * invZ[1] + b[2] * invZ[2];
+            for (int i = 0; i < 3; ++i) w[i] = b[i] * invZ[i] / sum;
+        }
+        auto lerp = [&](const double k[3], auto get) { return get(tri[0]) * float(k[0]) + get(tri[1]) * float(k[1]) + get(tri[2]) * float(k[2]); };
+
+        if (useDepth) {  // Z-buffer (slide CG.6): chi ve khi gan hon diem da ve tai pixel nay
+            const float z = static_cast<float>(w[0] * tri[0].z + w[1] * tri[1].z + w[2] * tri[2].z);
+            float& stored = fb.depthAt(column, row);
+            if (z >= stored) return;
+            stored = z;
+        }
+        Vec3 texel{1, 1, 1};
+        if (texture) {
+            const float u = static_cast<float>(w[0] * tri[0].u + w[1] * tri[1].u + w[2] * tri[2].u);
+            const float v = static_cast<float>(w[0] * tri[0].v + w[1] * tri[1].v + w[2] * tri[2].v);
+            texel = texture->sample(u, v);
+        }
+        Vec3 color;
+        if (phong) {
+            // Phong (slide CG.6): noi suy PHAP TUYEN (va vi tri) roi tinh chieu sang tai tung pixel.
+            // Texture thay mau nen (ka, kd); phan phan xa guong ks giu nguyen de vet sang van trang.
+            const Material& m = *ctx.material;
+            const Vec3 N = lerp(w, [](const ScreenVertex& v) { return v.normal; });
+            const Vec3 P = lerp(w, [](const ScreenVertex& v) { return v.world; });
+            color = phongTerms(P, N, ctx.eye, *ctx.lights, mul(m.ka, texel), mul(m.kd, texel), m.ks, m.shininess, s.blinnPhong);
+        } else {
+            color = gouraud ? lerp(b, [](const ScreenVertex& v) { return v.color; }) : tri[0].color;
+            color = mul(color, texel);
+        }
+        fb.setPixel(column, row, color);
+    };
+
     const ScreenVertex* sorted[3] = {&tri[0], &tri[1], &tri[2]};
     std::sort(sorted, sorted + 3, [](const ScreenVertex* left, const ScreenVertex* right) {
         return left->y < right->y;
@@ -65,17 +163,7 @@ void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext
         for (int row = firstRow; row < endRow; ++row) {
             const int firstColumn = static_cast<int>(std::clamp(std::ceil(left - 0.5), 0.0, double(fb.width)));
             const int endColumn = static_cast<int>(std::clamp(std::ceil(right - 0.5), 0.0, double(fb.width)));
-            for (int column = firstColumn; column < endColumn; ++column) {
-                Vec3 color = tri[0].color;
-                if (texture) {  // Sprint 5: nhan mau voi texel tai (u, v) noi suy o tam pixel
-                    float w[3];
-                    interpolationWeights(tri, column + 0.5f, row + 0.5f, perspective, w);
-                    const float u = w[0] * tri[0].u + w[1] * tri[1].u + w[2] * tri[2].u;
-                    const float v = w[0] * tri[0].v + w[1] * tri[1].v + w[2] * tri[2].v;
-                    color = mul(color, texture->sample(u, v));
-                }
-                fb.setPixel(column, row, color);
-            }
+            for (int column = firstColumn; column < endColumn; ++column) shadePixel(column, row);
             left += leftStep;
             right += rightStep;
         }
@@ -185,4 +273,19 @@ void renderScene(Framebuffer& fb, const std::vector<SceneObject>& objects, const
         ++stats.trianglesDrawn;
     }
     stats.msRaster = msSince(t1);
+
+    // Phim V (DHMTPTB3-32): hien mang do sau thay cho anh mau. Gan = sang, xa = toi,
+    // pixel khong co vat = den. Chuan hoa theo khoang [gan nhat, xa nhat] dang co trong khung.
+    if (settings.showDepth) {
+        float lo = std::numeric_limits<float>::infinity(), hi = 0;
+        for (float d : fb.depth)
+            if (std::isfinite(d)) { lo = std::min(lo, d); hi = std::max(hi, d); }
+        const float range = hi > lo ? hi - lo : 1.0f;
+        for (int y = 0; y < fb.height; ++y)
+            for (int x = 0; x < fb.width; ++x) {
+                const float d = fb.depthAt(x, y);
+                const float g = std::isfinite(d) ? 1.0f - 0.85f * (d - lo) / range : 0.0f;
+                fb.setPixel(x, y, {g, g, g});
+            }
+    }
 }
