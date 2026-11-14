@@ -10,6 +10,7 @@
 //   X debug xen mat gan: to mau phan tam giac bi clipNear cat (trong khung day tam)
 //   K canh minh hoa Painter (qua cau xuyen tam phang) <-> phong trung bay
 //   H bong do phang xuong san   keo qua cau den bang chuot: doi cho den
+//   F muc toi uu FPS: 1 luong -> 4 luong -> 4 luong + nua do phan giai khi di chuyen
 //   U bat/tat texture   I noi suy texture dung phoi canh <-> tuyen tinh tren man hinh (de so sanh)
 
 #include <algorithm>
@@ -32,6 +33,14 @@ namespace {
 
 int gWinW = 960, gWinH = 540;
 Framebuffer gFb;
+// Toi uu FPS (DHMTPTB3-45), phim F doi muc:
+//   0 = 1 luong, do phan giai day du (de so sanh "truoc toi uu")
+//   1 = 4 luong
+//   2 = 4 luong + nua do phan giai (480 x 270) trong luc camera/den dang di chuyen
+int gOptLevel = 2;
+constexpr int kFullW = 960, kFullH = 540;
+std::chrono::steady_clock::time_point gLastMove;  // lan cuoi camera hoac den thay doi
+std::vector<float> gLastView;                     // trang thai camera + den o khung truoc, de phat hien di chuyen
 std::vector<SceneObject> gObjects;
 // Den tran, dat TRONG phong (tran cao kRoomHeight = 3,5 m), lech ve phia nguoi xem.
 // 2 den tran (DHMTPTB3-43): den am ben trai, den lanh ben phai. Keo qua cau den bang chuot de doi cho.
@@ -248,7 +257,22 @@ void renderWorld() {
     addStats(gStats, more);
 }
 
+// Dang di chuyen? So vi tri mat, huong nhin, kieu chieu va vi tri den voi khung truoc.
+bool viewMoving() {
+    const Vec3 e = gCamera.eyePosition(), f = gCamera.forward();
+    std::vector<float> now = {e.x, e.y, e.z, f.x, f.y, f.z, float(gCamera.projection == Projection::Perspective)};
+    for (const Light& l : gLights) { now.push_back(l.position.x); now.push_back(l.position.z); }
+    const auto t = std::chrono::steady_clock::now();
+    if (now != gLastView) { gLastView = now; gLastMove = t; }
+    return std::chrono::duration<double>(t - gLastMove).count() < 0.15;  // dung tay 150 ms -> ve lai net
+}
+
 void display() {
+    // Chon do phan giai va so luong theo muc toi uu.
+    gSettings.threads = gOptLevel == 0 ? 1 : 4;
+    const bool half = gOptLevel == 2 && !gRenderDemo && viewMoving();
+    const int w = half ? kFullW / 2 : kFullW, h = half ? kFullH / 2 : kFullH;
+    if (gFb.width != w || gFb.height != h) gFb.resize(w, h);  // present() tu phong anh len vua cua so
     gFb.clear({0.12f, 0.12f, 0.14f});
     if (gRenderDemo) drawRenderDemo();
     else renderWorld();
@@ -257,16 +281,17 @@ void display() {
     present();
     if (!gRenderDemo && gDebugWire) drawDebugWire();
 
-    char line1[160], line2[160];
+    char line1[160], line2[200];
     std::snprintf(line1, sizeof line1, "%.0f FPS | %s | Back-face %s | %s | %s | texture %s", gFrameCounter.fps(), shadingName(gSettings.shading),
                   gSettings.backFace ? "bat" : "tat", gSettings.painter ? "Painter" : (gSettings.zBuffer ? "Z-buffer" : "khong khu"),
                   gCamera.projection == Projection::Perspective ? "phoi canh" : "song song",
                   !gSettings.texture ? "tat" : (gSettings.perspectiveCorrect ? "dung phoi canh" : "tuyen tinh (SAI)"));
     if (gRenderDemo)
         std::snprintf(line1, sizeof line1, "%.0f FPS | Demo scanline | Flat color | No depth test | T: scene", gFrameCounter.fps());
-    std::snprintf(line2, sizeof line2, "tam giac: %d vao, %d bo (back-face), %d ve | bien doi %.1f ms, to %.1f ms | %zu den, bong %s (H)",
+    static const char* const optNames[3] = {"1 luong", "4 luong", "4 luong + nua do phan giai khi di"};
+    std::snprintf(line2, sizeof line2, "tam giac: %d vao, %d bo, %d ve | bien doi %.1f ms, to %.1f ms | %dx%d, F: %s | %zu den, bong %s (H)",
                   gStats.trianglesIn, gStats.culledBackFace, gStats.trianglesDrawn, gStats.msTransform, gStats.msRaster,
-                  gLights.size(), gShadows ? "bat" : "tat");
+                  gFb.width, gFb.height, optNames[gOptLevel], gLights.size(), gShadows ? "bat" : "tat");
     glColor3f(1, 1, 1);
     drawText(8, gWinH - 18, line1);
     drawText(8, gWinH - 34, line2);
@@ -369,6 +394,7 @@ void keyboard(unsigned char key, int, int) {
             gSelected = -1;
             break;
         case 'h': case 'H': gShadows = !gShadows; break;
+        case 'f': case 'F': gOptLevel = (gOptLevel + 1) % 3; break;
         case 'u': case 'U': gSettings.texture = !gSettings.texture; break;
         case 'i': case 'I': gSettings.perspectiveCorrect = !gSettings.perspectiveCorrect; break;
         default: return;
@@ -452,7 +478,7 @@ int main(int argc, char** argv) {
     glutInitWindowSize(gWinW, gWinH);
     glutCreateWindow("Phong trung bay 3D");
 
-    gFb.resize(960, 540);
+    gFb.resize(kFullW, kFullH);
     // Vat o buc giua: file .obj truyen vao dong lenh, mac dinh am tra Utah.
     //   ./build/phong_trung_bay duong/dan/vat.obj
     const std::string objPath = argc > 1 ? argv[1] : "assets/teapot.obj";

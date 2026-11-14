@@ -851,6 +851,51 @@ int main() {
         expect(pick(marks, ray).index == 0, "den: click trung qua cau den chon dung den de keo");
     }
 
+    {
+        // Toi uu 4 luong (DHMTPTB3-45): anh va Z-buffer phai GIONG HET ban 1 luong o moi che do.
+        const std::vector<SceneObject> room = buildRoom("assets/teapot.obj");
+        const std::vector<Light> L = {Light{{-2.0f, 2.8f, 1.0f}, {0.75f, 0.70f, 0.62f}}, Light{{2.5f, 2.6f, -2.0f}, {0.5f, 0.56f, 0.7f}}};
+        Camera cam;
+        cam.eye = {0.3f, 1.6f, 3.5f};
+        cam.yaw = radians(-8);
+        Framebuffer one, four;
+        one.resize(320, 180);
+        four.resize(320, 180);
+        FrameStats s1, s4;
+        bool same = true;
+        for (int mode = 2; mode <= 4; ++mode)
+            for (int painter = 0; painter < 2; ++painter) {
+                RenderSettings r;
+                r.shading = ShadingMode(mode);
+                r.painter = painter;
+                r.threads = 1;
+                one.clear({0, 0, 0});
+                renderScene(one, room, cam, L, r, s1);
+                r.threads = 4;
+                four.clear({0, 0, 0});
+                renderScene(four, room, cam, L, r, s4);
+                same = same && one.color == four.color && one.depth == four.depth && s1.trianglesDrawn == s4.trianglesDrawn;
+            }
+        expect(same, "4 luong: anh va Z-buffer giong het 1 luong (Flat/Gouraud/Phong, Z-buffer va Painter)");
+        // So hang khong chia het cho so dai van to du (khung 7 hang, 4 luong).
+        Framebuffer odd;
+        odd.resize(9, 7);
+        ScreenVertex t[3];
+        t[0].x = 0; t[0].y = 0; t[1].x = 0; t[1].y = 7; t[2].x = 9; t[2].y = 0;
+        t[0].color = {1, 1, 1};
+        RenderSettings r4;
+        r4.zBuffer = false;
+        int filled = 0;
+        for (int band = 0; band < 3; ++band) fillTriangle(odd, t, ShadeContext{}, r4, band * 3, band * 3 + 3);
+        for (int y = 0; y < 7; ++y) for (int x = 0; x < 9; ++x) filled += odd.color[odd.index(x, y) * 4] > 0;
+        Framebuffer whole;
+        whole.resize(9, 7);
+        fillTriangle(whole, t, ShadeContext{}, r4);
+        int filledWhole = 0;
+        for (int y = 0; y < 7; ++y) for (int x = 0; x < 9; ++x) filledWhole += whole.color[whole.index(x, y) * 4] > 0;
+        expect(filled == filledWhole && filled > 0, "to theo dai hang: ghep cac dai = to ca tam giac");
+    }
+
     std::printf("%d dung, %d sai\n", gPass, gFail);
     return gFail == 0 ? 0 : 1;
 }
