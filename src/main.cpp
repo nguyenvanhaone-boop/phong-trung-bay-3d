@@ -9,6 +9,7 @@
 //   Click chuot trai (khong keo): chon vat bang tia, orbit quanh vat, hien bang thong tin
 //   X debug xen mat gan: to mau phan tam giac bi clipNear cat (trong khung day tam)
 //   K canh minh hoa Painter (qua cau xuyen tam phang) <-> phong trung bay
+//   H bong do phang xuong san   keo qua cau den bang chuot: doi cho den
 //   U bat/tat texture   I noi suy texture dung phoi canh <-> tuyen tinh tren man hinh (de so sanh)
 
 #include <algorithm>
@@ -24,6 +25,7 @@
 #include "platform/gl.hpp"
 #include "platform/frame_counter.hpp"
 #include "render/render.hpp"
+#include "render/shadow.hpp"
 #include "scene/scene.hpp"
 
 namespace {
@@ -32,7 +34,14 @@ int gWinW = 960, gWinH = 540;
 Framebuffer gFb;
 std::vector<SceneObject> gObjects;
 // Den tran, dat TRONG phong (tran cao kRoomHeight = 3,5 m), lech ve phia nguoi xem.
-std::vector<Light> gLights = {Light{{0.0f, 2.8f, 1.0f}, {1.0f, 1.0f, 1.0f}}};
+// 2 den tran (DHMTPTB3-43): den am ben trai, den lanh ben phai. Keo qua cau den bang chuot de doi cho.
+std::vector<Light> gLights = {
+    Light{{-2.0f, 2.8f, 1.0f}, {0.75f, 0.70f, 0.62f}},
+    Light{{2.5f, 2.6f, -2.0f}, {0.50f, 0.56f, 0.70f}},
+};
+bool gShadows = true;                     // phim H: bong do phang xuong san (DHMTPTB3-44)
+int gDragLight = -1;                      // den dang keo, -1 = khong keo den
+std::vector<SceneObject> gShadowObjects;  // tao lai moi khung vi den co the di chuyen
 Camera gCamera;
 RenderSettings gSettings;
 FrameStats gStats;
@@ -209,10 +218,40 @@ void drawDebugWire() {
     glEnd();
 }
 
+void addStats(FrameStats& total, const FrameStats& more) {
+    total.trianglesIn += more.trianglesIn;
+    total.culledBackFace += more.culledBackFace;
+    total.clipped += more.clipped;
+    total.trianglesDrawn += more.trianglesDrawn;
+    total.msTransform += more.msTransform;
+    total.msRaster += more.msRaster;
+}
+
+// Ve canh, roi bong tren san, roi qua cau den. Ba lan goi renderScene dung chung framebuffer va
+// Z-buffer nen bong bi buc che dung cho, den bi vat che dung cho.
+void renderWorld() {
+    renderScene(gFb, gObjects, gCamera, gLights, gSettings, gStats);
+    FrameStats more;
+    // Bong can Z-buffer (nam sat san); Painter ve rieng tung lan goi nen se de bong len vat -> tat.
+    const bool depthOk = gSettings.zBuffer && !gSettings.painter;
+    if (gShadows && depthOk && !gPainterDemo && static_cast<int>(gObjects.size()) > kRoomShellCount) {
+        Material shadowMat = gObjects[0].mesh.material;  // san: giu texture, chi con anh sang moi truong
+        shadowMat.name = "bong";
+        shadowMat.ka = shadowMat.kd * 0.3f;
+        shadowMat.kd = {0, 0, 0};
+        shadowMat.ks = {0, 0, 0};
+        buildPlanarShadows(gObjects, kRoomShellCount, gLights, shadowMat, kRoomHalfX, kRoomHalfZ, gShadowObjects);
+        renderScene(gFb, gShadowObjects, gCamera, gLights, gSettings, more);
+        addStats(gStats, more);
+    }
+    renderScene(gFb, buildLightMarkers(gLights), gCamera, gLights, gSettings, more);
+    addStats(gStats, more);
+}
+
 void display() {
     gFb.clear({0.12f, 0.12f, 0.14f});
     if (gRenderDemo) drawRenderDemo();
-    else renderScene(gFb, gObjects, gCamera, gLights, gSettings, gStats);
+    else renderWorld();
 
     glClear(GL_COLOR_BUFFER_BIT);
     present();
@@ -225,8 +264,9 @@ void display() {
                   !gSettings.texture ? "tat" : (gSettings.perspectiveCorrect ? "dung phoi canh" : "tuyen tinh (SAI)"));
     if (gRenderDemo)
         std::snprintf(line1, sizeof line1, "%.0f FPS | Demo scanline | Flat color | No depth test | T: scene", gFrameCounter.fps());
-    std::snprintf(line2, sizeof line2, "tam giac: %d vao, %d bo (back-face), %d ve | bien doi %.1f ms, to %.1f ms",
-                  gStats.trianglesIn, gStats.culledBackFace, gStats.trianglesDrawn, gStats.msTransform, gStats.msRaster);
+    std::snprintf(line2, sizeof line2, "tam giac: %d vao, %d bo (back-face), %d ve | bien doi %.1f ms, to %.1f ms | %zu den, bong %s (H)",
+                  gStats.trianglesIn, gStats.culledBackFace, gStats.trianglesDrawn, gStats.msTransform, gStats.msRaster,
+                  gLights.size(), gShadows ? "bat" : "tat");
     glColor3f(1, 1, 1);
     drawText(8, gWinH - 18, line1);
     drawText(8, gWinH - 34, line2);
@@ -328,6 +368,7 @@ void keyboard(unsigned char key, int, int) {
             gPainterDemo = !gPainterDemo;
             gSelected = -1;
             break;
+        case 'h': case 'H': gShadows = !gShadows; break;
         case 'u': case 'U': gSettings.texture = !gSettings.texture; break;
         case 'i': case 'I': gSettings.perspectiveCorrect = !gSettings.perspectiveCorrect; break;
         default: return;
@@ -348,7 +389,13 @@ void mouse(int button, int state, int x, int y) {
     if (button == GLUT_LEFT_BUTTON) {
         gDragging = state == GLUT_DOWN;
         gMouseX = x; gMouseY = y;
-        if (state == GLUT_DOWN) { gDownX = x; gDownY = y; }
+        if (state == GLUT_DOWN) {
+            gDownX = x; gDownY = y;
+            // Bam trung qua cau den -> keo den thay vi xoay camera.
+            const Ray ray = rayFromPixel(gCamera, static_cast<float>(x), static_cast<float>(y), gWinW, gWinH, shownAspect());
+            gDragLight = pick(buildLightMarkers(gLights), ray).index;
+        }
+        if (state == GLUT_UP && gDragLight >= 0) { gDragLight = -1; return; }
         // Tha chuot gan cho bam (<= 3 pixel) = click: chon vat bang tia.
         if (state == GLUT_UP && std::abs(x - gDownX) <= 3 && std::abs(y - gDownY) <= 3) {
             selectAt(x, y);
@@ -367,6 +414,21 @@ void mouse(int button, int state, int x, int y) {
 
 void motion(int x, int y) {
     if (!gDragging) return;
+    if (gDragLight >= 0) {
+        // Keo den tren mat phang ngang y = do cao den: giao tia chuot voi mat phang do.
+        Light& light = gLights[gDragLight];
+        const Ray ray = rayFromPixel(gCamera, static_cast<float>(x), static_cast<float>(y), gWinW, gWinH, shownAspect());
+        if (std::fabs(ray.dir.y) > 1e-4f) {
+            const float t = (light.position.y - ray.origin.y) / ray.dir.y;
+            if (t > 0) {
+                const Vec3 p = ray.origin + ray.dir * t;
+                light.position.x = std::clamp(p.x, -kRoomHalfX + 0.3f, kRoomHalfX - 0.3f);
+                light.position.z = std::clamp(p.z, -kRoomHalfZ + 0.3f, kRoomHalfZ - 0.3f);
+            }
+        }
+        glutPostRedisplay();
+        return;
+    }
     const float k = 0.005f;  // radian moi pixel keo
     gCamera.rotate((x - gMouseX) * k, -(y - gMouseY) * k);
     gMouseX = x; gMouseY = y;

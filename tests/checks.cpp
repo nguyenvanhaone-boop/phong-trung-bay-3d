@@ -13,6 +13,7 @@
 #include "mesh.hpp"
 #include "modeling/modeling.hpp"
 #include "render/render.hpp"
+#include "render/shadow.hpp"
 #include "scene/obj_loader.hpp"
 #include "scene/texture_loader.hpp"
 #include "scene/scene.hpp"
@@ -790,6 +791,64 @@ int main() {
             if (std::abs(int(correct[i]) - int(fb.color[i])) + std::abs(int(correct[i + 2]) - int(fb.color[i + 2])) > 60) ++diff;
         expect(diff > 500, "canh Painter: hai vat cat nhau -> Painter ve sai nhieu pixel so voi Z-buffer");
         std::printf("  canh Painter: %d pixel khac Z-buffer\n", diff);
+    }
+
+    {
+        // Bong do phang (DHMTPTB3-44): P' = S P nam tren san va thang hang voi den L va diem P.
+        const Vec3 L{1, 4, -2};
+        const Mat4 S = planarShadowMatrix(L);
+        bool onRay = true;
+        for (Vec3 P : {Vec3{0, 1, 0}, Vec3{2, 0.5f, 1}, Vec3{-1, 3, 3}}) {
+            const Vec4 h = S * Vec4{P.x, P.y, P.z, 1};
+            const Vec3 Q{h.x / h.w, h.y / h.w, h.z / h.w};
+            onRay = onRay && std::fabs(Q.y) < 1e-5f && length(cross(P - L, Q - L)) < 1e-4f && dot(P - L, Q - L) > 0;
+        }
+        expect(onRay, "bong: S chieu P len y = 0 theo tia tu den qua P");
+        const Vec4 foot = S * Vec4{L.x, 0, L.z, 1};
+        expect(near({foot.x / foot.w, 0, foot.z / foot.w}, {L.x, 0, L.z}), "bong: diem tren san giu nguyen (S P = P)");
+
+        // Hop 1 x 1 x 1 treo cao 1 m, den thang tren: bong la hinh vuong to hon (phong to Ly / (Ly - y)).
+        std::vector<SceneObject> objs(1);
+        objs[0].mesh = makeBox({0.5f, 0.5f, 0.5f}, Material{});
+        objs[0].model = translate({0, 1.5f, 0});
+        std::vector<SceneObject> sh;
+        Material sm;
+        buildPlanarShadows(objs, 0, {Light{{0, 4, 0}, {1, 1, 1}}}, sm, 6, 6, sh);
+        bool flat = sh.size() == 1;
+        float maxX = 0;
+        double upArea = 0;
+        for (const Vertex& v : sh[0].mesh.vertices) { flat = flat && std::fabs(v.position.y - 0.003f) < 1e-6f; maxX = std::max(maxX, v.position.x); }
+        for (const auto& t : sh[0].mesh.triangles) {
+            const Vec3 n = faceNormal(sh[0].mesh, t);
+            if (n.y > 0) upArea += n.y / 2;
+        }
+        // Mat tren (y = 2) xa san nhat nen phong to nhieu nhat: nua canh 0,5 * 4 / (4 - 2) = 1 -> bong 2 x 2.
+        // Den thang tren: chi mat tren huong ve den -> chieu xuong van huong len; 4 mat ben va mat day bi lat.
+        expect(flat && std::fabs(maxX - 1.0f) < 1e-4f, "bong: nam sat san, canh xa nhat theo ti le Ly / (Ly - y)");
+        expect(std::fabs(upArea - 4.0) < 1e-3, "bong: mat huong len (khong bi Back-face bo) phu dung 1 lop = dien tich bong");
+
+        // Den nam thap hon vat: dinh khong co bong -> bo tam giac.
+        buildPlanarShadows(objs, 0, {Light{{0, 1.2f, 0}, {1, 1, 1}}}, sm, 6, 6, sh);
+        expect(sh[0].mesh.triangles.size() < objs[0].mesh.triangles.size(), "bong: dinh cao hon den bi bo, khong chia cho w <= 0");
+
+        // Qua cau den (DHMTPTB3-43): mau = mau den (da chuan hoa), khong phu thuoc anh sang.
+        const std::vector<Light> lights = {Light{{0, 0, -3}, {0.5f, 0.25f, 0.1f}}, Light{{1, 0, -3}, {0.2f, 0.2f, 0.4f}}};
+        const std::vector<SceneObject> marks = buildLightMarkers(lights, 0.3f);
+        expect(marks.size() == 2 && near(marks[0].mesh.material.ka, {1, 0.5f, 0.2f}) && near(transformPoint(marks[1].model, {0, 0, 0}), {1, 0, -3}),
+               "den: moi den mot qua cau, mau chuan hoa, dat dung vi tri");
+        Framebuffer fb;
+        fb.resize(160, 90);
+        Camera c;
+        c.eye = {0, 0, 0};
+        RenderSettings rs;
+        rs.shading = ShadingMode::Phong;
+        FrameStats st;
+        fb.clear({0, 0, 0});
+        renderScene(fb, {marks[0]}, c, lights, rs, st);
+        const std::size_t ci = fb.index(80, 45) * 4;
+        expect(fb.color[ci] == 255 && fb.color[ci + 1] == 128 && fb.color[ci + 2] == 51, "den: qua cau phat sang dung mau den o moi che do to");
+        const Ray ray = rayFromPixel(c, 80, 45, 160, 90, 160.0f / 90);
+        expect(pick(marks, ray).index == 0, "den: click trung qua cau den chon dung den de keo");
     }
 
     std::printf("%d dung, %d sai\n", gPass, gFail);
