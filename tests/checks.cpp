@@ -205,9 +205,78 @@ int main() {
     fb.setPixel(0, 0, {1, 0, 0});
     expect(fb.color[fb.index(0, 0) * 4] == 255 && fb.index(0, 0) == 8, "pixel (0,0) o goc tren trai = hang luu cuoi");
 
-    // --- A · Khang: SAU KHI CAI de Casteljau ---
-    // std::array<Vec3, 4> P = {{{0, 0, 0}, {1, 2, 0}, {3, 2, 0}, {4, 0, 0}}};
-    // expect(near(bezierPoint(P, 0.5f), {2, 1.5f, 0}), "Bezier tai t = 0.5");
+    // --- A · Khang: Bezier, mat tron xoay ---
+    {
+        const std::array<Vec3, 4> P = {{{0, 0, 0}, {1, 2, 0}, {3, 2, 0}, {4, 0, 0}}};
+        expect(near(bezierPoint(P, 0.5f), {2, 1.5f, 0}), "Bezier tai t = 0.5");
+        expect(near(bezierPoint(P, 0), P[0]) && near(bezierPoint(P, 1), P[3]), "Bezier di qua P0 (t = 0) va P3 (t = 1)");
+        bool bern = true;
+        for (float t : {0.1f, 0.3f, 0.77f}) {  // so voi cong thuc Bernstein
+            const float s = 1 - t;
+            const Vec3 b = P[0] * (s * s * s) + P[1] * (3 * t * s * s) + P[2] * (3 * t * t * s) + P[3] * (t * t * t);
+            bern = bern && near(bezierPoint(P, t), b, 1e-5f);
+        }
+        expect(bern, "de Casteljau = cong thuc Bernstein");
+        const std::vector<Vec3> lv = deCasteljauLevels(P, 0.5f);
+        expect(lv.size() == 6 && near(lv[0], {0.5f, 1, 0}) && near(lv[5], bezierPoint(P, 0.5f)), "de Casteljau: 3 + 2 + 1 diem trung gian");
+        const float h = 1e-3f;
+        const Vec3 numeric = (bezierPoint(P, 0.4f + h) - bezierPoint(P, 0.4f - h)) / (2 * h);
+        expect(near(bezierTangent(P, 0.4f), numeric, 1e-2f), "dao ham Bezier khop dao ham so");
+        expect(near(bezierTangent(P, 0), (P[1] - P[0]) * 3) && near(bezierTangent(P, 1), (P[3] - P[2]) * 3), "B'(0) = 3(P1 - P0), B'(1) = 3(P3 - P2)");
+
+        // The tich co dau cua luoi kin: > 0 khi moi mat huong ra ngoai; bang the tich that khi luoi kin.
+        auto volume = [](const Mesh& m) {
+            double v = 0;
+            for (const auto& t : m.triangles)
+                v += dot(m.vertices[t[0]].position, cross(m.vertices[t[1]].position, m.vertices[t[2]].position)) / 6.0;
+            return v;
+        };
+        auto relErr = [](double a, double b) { return std::fabs(a - b) / b; };
+        std::string err;
+        Material mat;
+        const float r = 0.5f;
+        const Mesh sphere = makeSphere(r, 32, 48, mat);
+        expect(validate(sphere, err) && !sphere.triangles.empty(), "qua cau: luoi hop le");
+        expect(relErr(volume(sphere), 4.0 / 3 * kPi * r * r * r) < 0.01, "qua cau: kin, dung chieu, the tich 4/3 pi r^3 (sai < 1 %)");
+        bool onSphere = true, radialNormal = true;
+        int poles = 0;
+        for (const Vertex& v : sphere.vertices) {
+            onSphere = onSphere && std::fabs(length(v.position) - r) < 1e-3f;
+            radialNormal = radialNormal && dot(v.normal, normalize(v.position)) > 0.999f;
+            if (std::fabs(std::fabs(v.position.y) - r) < 1e-6f) {
+                ++poles;
+                radialNormal = radialNormal && near(v.normal, {0, v.position.y > 0 ? 1.0f : -1.0f, 0});
+            }
+        }
+        expect(onSphere, "qua cau: moi dinh cach tam dung r (Bezier xap xi duong tron)");
+        expect(radialNormal, "qua cau: phap tuyen giai tich = huong ban kinh, cuc = (0, +-1, 0)");
+        expect(poles == 2, "qua cau: moi cuc gom thanh 1 dinh");
+        bool unit = true;
+        for (const Vertex& v : sphere.vertices) unit = unit && std::fabs(length(v.normal) - 1) < 1e-4f;
+        expect(unit, "mat tron xoay: phap tuyen do dai 1");
+
+        const Mesh cyl = makeCylinder(0.3f, 1.0f, 64, mat);
+        expect(validate(cyl, err) && relErr(volume(cyl), kPi * 0.09 * 1.0) < 0.01, "hinh tru: kin, the tich pi r^2 h");
+        int capUp = 0, sideAtTop = 0;
+        for (const Vertex& v : cyl.vertices)
+            if (std::fabs(v.position.y - 1) < 1e-6f && length(Vec3{v.position.x, 0, v.position.z}) > 0.29f) {
+                if (near(v.normal, {0, 1, 0})) ++capUp;
+                else if (std::fabs(v.normal.y) < 1e-6f) ++sideAtTop;
+            }
+        expect(capUp == 65 && sideAtTop == 65, "hinh tru: mep nap tach 2 vong dinh (phap tuyen nap va than) -> canh sac");
+        const Mesh cone = makeCone(0.4f, 0.9f, 64, mat);
+        expect(validate(cone, err) && relErr(volume(cone), kPi * 0.16 * 0.9 / 3) < 0.01, "hinh non: kin, the tich pi r^2 h / 3");
+        const Mesh torus = makeTorus(0.5f, 0.15f, 32, 48, mat);
+        expect(validate(torus, err) && relErr(volume(torus), 2 * kPi * kPi * 0.5 * 0.15 * 0.15) < 0.01, "xuyen: kin, the tich 2 pi^2 R a^2");
+
+        for (int i = 0; i < 5; ++i) {
+            const Profile pr = exhibitProfile(i);
+            bool c0 = true;
+            for (std::size_t k = 1; k < pr.segments.size(); ++k) c0 = c0 && near(pr.segments[k - 1][3], pr.segments[k][0]);
+            const Mesh m = revolve(pr, 8, 32, mat);
+            expect(c0 && validate(m, err) && volume(m) > 0, "vat trung bay " + std::to_string(i) + ": profile lien tuc, luoi hop le, kin va dung chieu");
+        }
+    }
 
     // --- B · Hao: camera ---
     {

@@ -23,5 +23,14 @@ struct Profile {
 // Ket qua: Mesh co phap tuyen dinh va (u, v), dung quy uoc trong mesh.hpp.
 Mesh revolve(const Profile& profile, int ringsPerSegment, int slices, const Material& material);
 
+// Doan thang a -> b viet duoi dang Bezier bac 3 (2 diem dieu khien chia 3 doan deu).
+std::array<Vec3, 4> bezierLine(Vec3 a, Vec3 b);
+
 // Mat co san (Sprint 4): deu la mat tron xoay voi profile don gian.
-Mesh makeSphere(float radius, int rings, int slices, const Material& material);
+Mesh makeSphere(float radius, int rings, int slices, const Material& material);          // tam o goc
+Mesh makeCylinder(float radius, float height, int slices, const Material& material);     // day o y = 0
+Mesh makeCone(float radius, float height, int slices, const Material& material);         // day o y = 0
+Mesh makeTorus(float majorRadius, float minorRadius, int rings, int slices, const Material& material);  // tam o goc
+
+// Profile cua 5 vat trung bay (binh, binh co cao, qua cau, bat, lo), day vat o y = 0, don vi met.
+Profile exhibitProfile(int index);

@@ -261,16 +261,19 @@ std::vector<SceneObject> buildRoom(const std::string& objPath, std::string* objE
         stand.mesh.name = "buc " + std::to_string(i + 1);
         room.push_back(std::move(stand));
 
-        // Vat trung bay: dung mat tron xoay cua phan A (Khang). Khi phan A chua cai xong
-        // (makeSphere tra ve luoi rong), tam dat mot hop nho xoay 45 do.
-        Mesh exhibit = makeSphere(0.25f, 24, 32, exhibitMats[i]);
-        float yaw = 0, lift = 0.25f;  // lift = khoang cach tu mat buc den tam vat
-        if (exhibit.triangles.empty()) {
-            exhibit = makeBox({0.18f, 0.18f, 0.18f}, exhibitMats[i]);
-            exhibit.name = "vat tam (cho phan A)";
-            yaw = 45;
-            lift = 0.18f;
+        // Vat trung bay: mat tron xoay tu profile Bezier cua phan A. Day vat dat tren mat buc.
+        // Vat so 2 la qua cau (tam o goc) nen nang len 1 ban kinh.
+        static const char* const names[5] = {"binh co thon", "binh co cao", "qua cau", "bat rong mieng", "lo mieng hep"};
+        Mesh exhibit;
+        float lift = 0;
+        const float yaw = 0;
+        if (i == 2) {
+            exhibit = makeSphere(0.2f, 24, 32, exhibitMats[i]);
+            lift = 0.2f;
+        } else {
+            exhibit = revolve(exhibitProfile(i), 8, 40, exhibitMats[i]);
         }
+        exhibit.name = names[i];
         room.push_back(place(std::move(exhibit), {base.x, 2 * standHalf.y + lift, base.z}, yaw));
     }
 
