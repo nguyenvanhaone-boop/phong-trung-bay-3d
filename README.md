@@ -67,6 +67,8 @@ không phụ thuộc vào Mesh/camera chưa hoàn thiện. Phím `T` chuyển de
 | G | Khung dây phủ bằng GL_LINES (dùng cùng phím X để xem phần bị xén mặt gần) |
 | X | Debug xén mặt gần: tô màu cam phần tam giác bị cắt, đỏ là cạnh nằm trên mặt phẳng gần |
 | K | Cảnh quả cầu xuyên tấm phẳng (bấm O để thấy Painter vẽ sai) ↔ phòng trưng bày |
+| H | Bật/tắt bóng đổ phẳng xuống sàn |
+| Kéo quả cầu đèn | Dời đèn trên mặt phẳng ngang (có 2 đèn: ấm bên trái, lạnh bên phải) |
 | U | Bật/tắt texture (sàn gỗ, bục đá) |
 | I | Nội suy texture đúng phối cảnh ↔ tuyến tính trên màn hình (để thấy sàn bị méo khi nội suy sai) |
 | Esc | Thoát |
