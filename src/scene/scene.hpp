@@ -55,6 +55,12 @@ Mesh makeBox(Vec3 half, const Material& material, bool inward = false, unsigned 
 constexpr int kRoomShellCount = 3;
 std::vector<SceneObject> buildRoom(const std::string& objPath = "", std::string* objError = nullptr);
 
+// Canh minh hoa Painter sai (DHMTPTB3-38): qua cau bi mot tam phang nghieng cat xuyen qua tam.
+// Hai vat cat nhau nen khong co thu tu ve "xa truoc, gan sau" nao dung cho moi tam giac.
+// Tam canh o kPainterDemoCenter.
+constexpr Vec3 kPainterDemoCenter{0, 1, 0};
+std::vector<SceneObject> buildPainterDemo();
+
 // ---- Chon vat bang tia (Sprint 4, DHMTPTB3-36) ----
 // Ma tran nghich dao 4x4 (Gauss–Jordan). Tra ve false neu ma tran suy bien.
 bool inverse(const Mat4& m, Mat4& out);

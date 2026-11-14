@@ -297,6 +297,25 @@ std::vector<SceneObject> buildRoom(const std::string& objPath, std::string* objE
     return room;
 }
 
+std::vector<SceneObject> buildPainterDemo() {
+    std::vector<SceneObject> demo;
+    SceneObject ball;
+    ball.mesh = makeSphere(0.5f, 24, 36, mat("qua cau do", {0.85f, 0.15f, 0.12f}, {0.6f, 0.6f, 0.6f}, 48));
+    ball.model = translate(kPainterDemoCenter);
+    demo.push_back(std::move(ball));
+    SceneObject plate;
+    plate.mesh = makeBox({0.9f, 0.015f, 0.7f}, mat("tam phang xanh", {0.2f, 0.45f, 0.85f}, {0.3f, 0.3f, 0.3f}, 32));
+    plate.mesh.name = "tam phang";
+    plate.model = translate(kPainterDemoCenter) * rotateY(radians(-20)) * rotateX(radians(70));  // chi quay: phap tuyen dung
+    demo.push_back(std::move(plate));
+    SceneObject floor;
+    floor.mesh = makeBox({1.6f, 0.02f, 1.6f}, mat("san xam", {0.5f, 0.5f, 0.52f}, {0.05f, 0.05f, 0.05f}, 8));
+    floor.mesh.name = "san";
+    floor.model = translate({0, -0.02f, 0});
+    demo.push_back(std::move(floor));
+    return demo;
+}
+
 // ============================================================================
 // 6. CHON VAT BANG TIA — Sprint 4 (DHMTPTB3-36)
 // ============================================================================

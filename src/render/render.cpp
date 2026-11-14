@@ -1,4 +1,4 @@
-// PHAN C — HIEN THI (Lam). Chieu sang Phong, Flat/Gouraud/Phong, Back-face, Z-buffer; Painter con TODO.
+// PHAN C — HIEN THI (Lam). Chieu sang Phong, Flat/Gouraud/Phong, Back-face, Z-buffer, Painter; khung day Bresenham.
 #include "render.hpp"
 
 #include <algorithm>
@@ -177,9 +177,58 @@ void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext
     fillHalf(sorted[1]->y, sorted[2]->y, middleLeft, middleRight, sorted[2]->x, sorted[2]->x);
 }
 
+// Bresenham (Lab 01, slide CG.2): ve doan thang chi bang cong/tru so nguyen.
+// Chon truc "chinh" theo do doc:
+//   |dy| <= |dx| (4 huong gan ngang): moi buoc x tang/giam 1, y doi khi sai so tich luy vuot 1/2.
+//   |dy| >  |dx| (4 huong gan dung) : vai tro x, y doi cho.
+// sx, sy = +-1 cho phep di ve ca 2 phia -> du 8 truong hop huong ma khong lap code.
+// Sai so nhan 2*dx de khong co phan so: p = 2dy - dx; p < 0 -> giu y, p += 2dy; nguoc lai y += sy, p += 2(dy - dx).
 void drawLineBresenham(Framebuffer& fb, int x0, int y0, int x1, int y1, Vec3 color) {
-    // TODO(Khang, Sprint 4): Bresenham 8 truong hop huong (code Lab 01).
-    (void)fb; (void)x0; (void)y0; (void)x1; (void)y1; (void)color;
+    const int dx = std::abs(x1 - x0), dy = std::abs(y1 - y0);
+    const int sx = x1 >= x0 ? 1 : -1, sy = y1 >= y0 ? 1 : -1;
+    int x = x0, y = y0;
+    if (dy <= dx) {                       // truc chinh x
+        int p = 2 * dy - dx;
+        for (int i = 0; i <= dx; ++i) {
+            fb.setPixel(x, y, color);
+            x += sx;
+            if (p < 0) p += 2 * dy;
+            else { y += sy; p += 2 * (dy - dx); }
+        }
+    } else {                              // truc chinh y
+        int p = 2 * dx - dy;
+        for (int i = 0; i <= dy; ++i) {
+            fb.setPixel(x, y, color);
+            y += sy;
+            if (p < 0) p += 2 * dx;
+            else { x += sx; p += 2 * (dx - dy); }
+        }
+    }
+}
+
+// Liang–Barsky: cat doan thang (a -> b) theo hinh chu nhat [0, w-1] x [0, h-1] truoc khi Bresenham.
+// Can vi canh gan mat phang gan co the chieu ra toa do rat lon (hang trieu pixel): khong cat thi
+// vong lap Bresenham rat dai, va ep float qua lon sang int la loi.
+// Diem tren doan: P(t) = a + t (b - a), t in [0, 1]. Moi canh khung cho mot bat dang thuc p_k t <= q_k.
+bool clipLineToRect(float& ax, float& ay, float& bx, float& by, float w, float h) {
+    // Tinh bang double: toa do co the toi 1e6 pixel, float chi giu ~7 chu so.
+    const double x0 = ax, y0 = ay, dx = double(bx) - x0, dy = double(by) - y0;
+    const double p[4] = {-dx, dx, -dy, dy};
+    const double q[4] = {x0, w - 1 - x0, y0, h - 1 - y0};
+    double t0 = 0, t1 = 1;
+    for (int k = 0; k < 4; ++k) {
+        if (p[k] == 0) {
+            if (q[k] < 0) return false;    // song song voi canh khung va nam ngoai
+            continue;
+        }
+        const double t = q[k] / p[k];
+        if (p[k] < 0) t0 = std::max(t0, t);  // di vao
+        else t1 = std::min(t1, t);           // di ra
+        if (t0 > t1) return false;
+    }
+    ax = float(x0 + t0 * dx); ay = float(y0 + t0 * dy);
+    bx = float(x0 + t1 * dx); by = float(y0 + t1 * dy);
+    return true;
 }
 
 namespace {
@@ -244,10 +293,12 @@ void renderScene(Framebuffer& fb, const std::vector<SceneObject>& objects, const
 
     auto t1 = std::chrono::steady_clock::now();
     if (settings.painter) {
-        // TODO(Lam, Sprint 4): Painter — sap xep queue tu xa den gan roi ve de len nhau
-        // (thay std::sort san co bang thuat toan sap xep minh tu cai neu thay yeu cau).
-    }
-    ShadeContext ctx;
+        // Painter (slide CG.6): ve tu XA den GAN, vat gan ve sau de len vat xa; khong can Z-buffer.
+        // Do sau moi tam giac = trung binh z 3 dinh. SAI khi 2 tam giac cat nhau hoac che vong tron
+        // (khong co thu tu nao dung) -> xem canh qua cau xuyen tam phang (phim K).
+        // stable_sort: tam giac cung do sau giu thu tu cu -> anh khong nhay giua cac khung hinh.
+        std::stable_sort(queue.begin(), queue.end(), [](const Pending& a, const Pending& b) { return a.depth > b.depth; });
+    }    ShadeContext ctx;
     ctx.lights = &lights; ctx.eye = eye;
     ctx.perspective = camera.projection == Projection::Perspective;
     for (Pending& p : queue) {
@@ -265,7 +316,9 @@ void renderScene(Framebuffer& fb, const std::vector<SceneObject>& objects, const
             for (int e = 0; e < 3; ++e) {
                 const ScreenVertex& a = p.v[e];
                 const ScreenVertex& b = p.v[(e + 1) % 3];
-                drawLineBresenham(fb, static_cast<int>(a.x), static_cast<int>(a.y), static_cast<int>(b.x), static_cast<int>(b.y), line);
+                float ax = a.x, ay = a.y, bx = b.x, by = b.y;
+                if (clipLineToRect(ax, ay, bx, by, float(fb.width), float(fb.height)))
+                    drawLineBresenham(fb, int(std::lround(ax)), int(std::lround(ay)), int(std::lround(bx)), int(std::lround(by)), line);
             }
         } else {
             fillTriangle(fb, p.v, ctx, settings);
