@@ -31,7 +31,9 @@ struct ShadeContext {
 //                        w_i = (b_i / z_i) / (b0/z0 + b1/z1 + b2/z2)
 // Lam co the dung lai cho Gouraud (color), Phong (normal, world) va Z-buffer.
 void interpolationWeights(const ScreenVertex tri[3], float px, float py, bool perspective, float w[3]);
-void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext& ctx, const RenderSettings& s);
+// rowBegin, rowEnd: chi to cac hang trong [rowBegin, rowEnd) (de nhieu luong to song song).
+void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext& ctx, const RenderSettings& s,
+                  int rowBegin = 0, int rowEnd = 1 << 30);
 
 // Ve doan thang bang Bresenham (Lab 01) — Khang cai, dung cho che do khung day.
 void drawLineBresenham(Framebuffer& fb, int x0, int y0, int x1, int y1, Vec3 color);

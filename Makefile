@@ -7,6 +7,7 @@ CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra
 CXXFLAGS += -Iinclude -Isrc
 
 ifeq ($(OS),Windows_NT)
+  CXXFLAGS += -pthread
   GL_LIBS = -lfreeglut -lopengl32 -lglu32
   EXE     = .exe
 else
@@ -15,6 +16,7 @@ else
     CXXFLAGS += -DGL_SILENCE_DEPRECATION
     GL_LIBS   = -framework OpenGL -framework GLUT
   else
+    CXXFLAGS += -pthread
     GL_LIBS   = -lglut -lGL
   endif
   EXE =

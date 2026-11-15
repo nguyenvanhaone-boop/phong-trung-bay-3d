@@ -19,6 +19,7 @@ struct RenderSettings {
     bool blinnPhong = false;
     bool texture = true;             // phim U: bat/tat texture (Sprint 5)
     bool perspectiveCorrect = true;  // phim I: noi suy (u, v) dung phoi canh <-> tuyen tinh tren man hinh (de so sanh)
+    int threads = 4;                 // phim F: so luong to song song (DHMTPTB3-45); 1 = tuan tu
 };
 
 // Dinh trong he quan sat (sau view * model), truoc khi chieu. Dung cho buoc xen mat gan.

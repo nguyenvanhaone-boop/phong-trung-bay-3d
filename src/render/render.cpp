@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <thread>
 
 namespace {
 
@@ -78,7 +79,8 @@ void interpolationWeights(const ScreenVertex tri[3], float px, float py, bool pe
     for (int i = 0; i < 3; ++i) w[i] = static_cast<float>(b[i]);
 }
 
-void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext& ctx, const RenderSettings& s) {
+void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext& ctx, const RenderSettings& s,
+                  int rowBegin, int rowEnd) {
     const Texture* texture = (s.texture && ctx.material && ctx.material->texture) ? ctx.material->texture.get() : nullptr;
     const bool perspective = s.perspectiveCorrect && ctx.perspective;
     if (fb.width <= 0 || fb.height <= 0 || s.shading == ShadingMode::Wireframe) return;
@@ -156,16 +158,19 @@ void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext
         if (topY >= bottomY) return;
         const double leftStep = (bottomLeft - topLeft) / (bottomY - topY);
         const double rightStep = (bottomRight - topRight) / (bottomY - topY);
-        const int firstRow = static_cast<int>(std::clamp(std::ceil(topY - 0.5), 0.0, double(fb.height)));
-        const int endRow = static_cast<int>(std::clamp(std::ceil(bottomY - 0.5), 0.0, double(fb.height)));
-        double left = topLeft + (firstRow + 0.5 - topY) * leftStep;
-        double right = topRight + (firstRow + 0.5 - topY) * rightStep;
+        // Chi to cac hang trong [rowBegin, rowEnd): moi luong to mot dai hang rieng (DHMTPTB3-45).
+        const double lo = std::max(0, rowBegin), hi = std::min(fb.height, rowEnd);
+        const int firstRow = static_cast<int>(std::clamp(std::ceil(topY - 0.5), lo, std::max(lo, hi)));
+        const int endRow = static_cast<int>(std::clamp(std::ceil(bottomY - 0.5), lo, std::max(lo, hi)));
         for (int row = firstRow; row < endRow; ++row) {
+            // Tinh mep trai/phai truc tiep tai tam hang (khong cong don left += leftStep): cong don
+            // tich luy sai so float, pixel nam dung tren canh co the lech sang 1 ben tuy hang bat dau
+            // -> to theo dai hang (nhieu luong) se khac to ca tam giac.
+            const double left = topLeft + (row + 0.5 - topY) * leftStep;
+            const double right = topRight + (row + 0.5 - topY) * rightStep;
             const int firstColumn = static_cast<int>(std::clamp(std::ceil(left - 0.5), 0.0, double(fb.width)));
             const int endColumn = static_cast<int>(std::clamp(std::ceil(right - 0.5), 0.0, double(fb.width)));
             for (int column = firstColumn; column < endColumn; ++column) shadePixel(column, row);
-            left += leftStep;
-            right += rightStep;
         }
     };
 
@@ -298,21 +303,45 @@ void renderScene(Framebuffer& fb, const std::vector<SceneObject>& objects, const
         // (khong co thu tu nao dung) -> xem canh qua cau xuyen tam phang (phim K).
         // stable_sort: tam giac cung do sau giu thu tu cu -> anh khong nhay giua cac khung hinh.
         std::stable_sort(queue.begin(), queue.end(), [](const Pending& a, const Pending& b) { return a.depth > b.depth; });
-    }    ShadeContext ctx;
-    ctx.lights = &lights; ctx.eye = eye;
-    ctx.perspective = camera.projection == Projection::Perspective;
-    for (Pending& p : queue) {
-        ctx.material = p.mat;
-        p.v[0].color = p.mat->kd;
-        if (settings.shading == ShadingMode::Flat) {
-            const Vec3 c = (p.v[0].world + p.v[1].world + p.v[2].world) / 3.0f;
-            const Vec3 n = normalize(cross(p.v[1].world - p.v[0].world, p.v[2].world - p.v[0].world));
-            p.v[0].color = shadePhong(c, n, eye, lights, *p.mat, settings.blinnPhong);
-        } else if (settings.shading == ShadingMode::Gouraud) {
-            for (ScreenVertex& v : p.v) v.color = shadePhong(v.world, v.normal, eye, lights, *p.mat, settings.blinnPhong);
+    }
+
+    // ---- Song song hoa (DHMTPTB3-45) ----
+    // Buoc 1: tinh mau dinh (Flat/Gouraud) cho tung tam giac — chia danh sach tam giac cho cac luong,
+    //         moi luong chi ghi vao tam giac cua minh.
+    // Buoc 2: to — chia MAN HINH thanh cac dai hang xen ke (luong k to dai k, k + T, k + 2T, ...).
+    //         Moi pixel chi thuoc 1 luong nen khong tranh nhau ghi mau / Z-buffer, va trong moi dai
+    //         tam giac van ve dung thu tu cua queue (Painter van dung).
+    const int threads = std::clamp(settings.threads, 1, 16);
+    auto parallel = [](int count, auto&& job) {  // job(k) chay tren luong k, k = 0..count-1
+        if (count <= 1) { job(0); return; }
+        std::vector<std::thread> pool;
+        for (int k = 1; k < count; ++k) pool.emplace_back(job, k);
+        job(0);
+        for (std::thread& t : pool) t.join();
+    };
+
+    parallel(threads, [&](int k) {
+        const std::size_t n = queue.size();
+        for (std::size_t i = n * k / threads; i < n * (k + 1) / threads; ++i) {
+            Pending& p = queue[i];
+            p.v[0].color = p.mat->kd;
+            if (settings.shading == ShadingMode::Flat) {
+                const Vec3 c = (p.v[0].world + p.v[1].world + p.v[2].world) / 3.0f;
+                const Vec3 nrm = normalize(cross(p.v[1].world - p.v[0].world, p.v[2].world - p.v[0].world));
+                p.v[0].color = shadePhong(c, nrm, eye, lights, *p.mat, settings.blinnPhong);
+            } else if (settings.shading == ShadingMode::Gouraud) {
+                for (ScreenVertex& v : p.v) v.color = shadePhong(v.world, v.normal, eye, lights, *p.mat, settings.blinnPhong);
+            }
         }
-        if (settings.shading == ShadingMode::Wireframe) {
-            const Vec3 line{0.9f, 0.9f, 0.9f};
+    });
+
+    ShadeContext base;
+    base.lights = &lights; base.eye = eye;
+    base.perspective = camera.projection == Projection::Perspective;
+    if (settings.shading == ShadingMode::Wireframe) {
+        // Khung day: Bresenham ve ca doan thang qua nhieu dai hang -> lam tuan tu.
+        const Vec3 line{0.9f, 0.9f, 0.9f};
+        for (const Pending& p : queue)
             for (int e = 0; e < 3; ++e) {
                 const ScreenVertex& a = p.v[e];
                 const ScreenVertex& b = p.v[(e + 1) % 3];
@@ -320,11 +349,26 @@ void renderScene(Framebuffer& fb, const std::vector<SceneObject>& objects, const
                 if (clipLineToRect(ax, ay, bx, by, float(fb.width), float(fb.height)))
                     drawLineBresenham(fb, int(std::lround(ax)), int(std::lround(ay)), int(std::lround(bx)), int(std::lround(by)), line);
             }
-        } else {
-            fillTriangle(fb, p.v, ctx, settings);
-        }
-        ++stats.trianglesDrawn;
+    } else {
+        // Dai hang cao ~ height / (4T): du nho de chia deu viec (san o duoi nang hon tran), du lon de
+        // moi luong khong phai duyet queue qua nhieu lan.
+        const int bandCount = threads == 1 ? 1 : threads * 4;
+        const int bandH = (fb.height + bandCount - 1) / bandCount;
+        parallel(threads, [&](int k) {
+            ShadeContext ctx = base;
+            for (int band = k; band < bandCount; band += threads) {
+                const int r0 = band * bandH, r1 = std::min(fb.height, r0 + bandH);
+                for (const Pending& p : queue) {
+                    const float top = std::min({p.v[0].y, p.v[1].y, p.v[2].y});
+                    const float bottom = std::max({p.v[0].y, p.v[1].y, p.v[2].y});
+                    if (bottom < r0 - 1 || top > r1 + 1) continue;  // tam giac khong cham dai nay
+                    ctx.material = p.mat;
+                    fillTriangle(fb, p.v, ctx, settings, r0, r1);
+                }
+            }
+        });
     }
+    stats.trianglesDrawn = static_cast<int>(queue.size());
     stats.msRaster = msSince(t1);
 
     // Phim V (DHMTPTB3-32): hien mang do sau thay cho anh mau. Gan = sang, xa = toi,
