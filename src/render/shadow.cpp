@@ -2,8 +2,10 @@
 #include "shadow.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 #include "modeling/modeling.hpp"
+#include "render/render.hpp"
 
 Mat4 planarShadowMatrix(Vec3 L) {
     Mat4 S;
@@ -64,4 +66,33 @@ std::vector<SceneObject> buildLightMarkers(const std::vector<Light>& lights, flo
         markers.push_back(std::move(o));
     }
     return markers;
+}
+
+void drawNormals(Framebuffer& fb, const std::vector<SceneObject>& objects, std::size_t first, const Camera& camera,
+                 float len, Vec3 color) {
+    const Mat4 view = camera.viewMatrix();
+    const Mat4 proj = camera.projectionMatrix(static_cast<float>(fb.width) / fb.height);
+    const Vec3 eye = camera.eyePosition();
+    const float zn = -camera.nearPlane;
+    auto toScreen = [&](Vec3 v, float& x, float& y) {
+        const Vec4 c = proj * Vec4{v.x, v.y, v.z, 1};
+        x = (c.x / c.w * 0.5f + 0.5f) * fb.width;
+        y = (0.5f - c.y / c.w * 0.5f) * fb.height;
+    };
+    for (std::size_t k = first; k < objects.size(); ++k) {
+        const SceneObject& o = objects[k];
+        if (!o.visible) continue;
+        for (const Vertex& vtx : o.mesh.vertices) {
+            const Vec3 p = transformPoint(o.model, vtx.position);
+            const Vec3 n = normalize(transformDir(o.model, vtx.normal));
+            if (camera.projection == Projection::Perspective ? dot(n, eye - p) <= 0 : dot(n, -camera.forward()) <= 0) continue;
+            const Vec3 a = transformPoint(view, p), b = transformPoint(view, p + n * len);
+            if (a.z > zn || b.z > zn) continue;  // gach cham mat phang gan: bo (ngan, khong can xen)
+            float ax, ay, bx, by;
+            toScreen(a, ax, ay);
+            toScreen(b, bx, by);
+            if (clipLineToRect(ax, ay, bx, by, float(fb.width), float(fb.height)))
+                drawLineBresenham(fb, int(std::lround(ax)), int(std::lround(ay)), int(std::lround(bx)), int(std::lround(by)), color);
+        }
+    }
 }

@@ -4,3 +4,6 @@ build/
 .DS_Store
 .vscode/
 *.dSYM/
+# file do trinh soan duong cong tao ra (phim W, X)
+/profile.txt
+/vat_tron_xoay.obj
