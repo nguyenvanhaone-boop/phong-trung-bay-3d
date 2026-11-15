@@ -70,10 +70,30 @@ không phụ thuộc vào Mesh/camera chưa hoàn thiện. Phím `T` chuyển de
 | H | Bật/tắt bóng đổ phẳng xuống sàn |
 | Kéo quả cầu đèn | Dời đèn trên mặt phẳng ngang (có 2 đèn: ấm bên trái, lạnh bên phải) |
 | F | Mức tối ưu FPS: 1 luồng → 4 luồng → 4 luồng + nửa độ phân giải khi di chuyển (mặc định) |
+| E | Mở / đóng trình soạn đường cong (xem bảng dưới) |
+| N | Hiện pháp tuyến đỉnh dạng gạch ngắn |
 | U | Bật/tắt texture (sàn gỗ, bục đá) |
 | I | Nội suy texture đúng phối cảnh ↔ tuyến tính trên màn hình (để thấy sàn bị méo khi nội suy sai) |
 | Esc | Thoát |
 | T | Demo scanline màu phẳng ↔ cảnh 3D |
+
+### Trình soạn đường cong (phím E)
+
+Nửa trái là mặt phẳng profile (x = bán kính, y = độ cao, lưới 10 cm, trục quay màu đỏ). Nửa phải là mặt tròn xoay sinh ra từ đường cong, xoay chậm, cập nhật ngay khi kéo điểm.
+
+| Phím / chuột | Chức năng |
+| --- | --- |
+| Chuột trái | Thêm điểm, hoặc kéo điểm có sẵn. Bezier: vuông = điểm nối (nằm trên cong), tròn = điểm điều khiển; từ đoạn thứ 2 chỉ cần click 2 điểm, điểm thứ nhất tự đặt đối xứng để giữ C1 |
+| Chuột phải | Xóa điểm (Bezier xóa cả đoạn chứa điểm đó) |
+| S | Bezier nối C1 ↔ B-spline bậc 3 đều |
+| T | Chạy t từ 0 đến 1, vẽ các đoạn nội suy de Casteljau |
+| N | Hiện pháp tuyến trên mặt tròn xoay |
+| P | Nạp lần lượt 5 mẫu có sẵn |
+| W / R | Lưu / tải điểm điều khiển (`profile.txt`) |
+| X | Xuất lưới ra `vat_tron_xoay.obj` (mở bằng Blender, hoặc `./build/phong_trung_bay vat_tron_xoay.obj`) |
+| Enter | Đặt vật vừa soạn lên bục của vật đang chọn (hoặc bục 1) |
+| Backspace | Xóa hết điểm |
+| E | Về phòng trưng bày |
 
 ## Ai làm phần nào
 

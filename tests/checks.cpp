@@ -3,6 +3,7 @@
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <algorithm>
@@ -11,6 +12,8 @@
 #include "framebuffer.hpp"
 #include "math3d.hpp"
 #include "mesh.hpp"
+#include "modeling/curve_editor.hpp"
+#include "modeling/editor_view.hpp"
 #include "modeling/modeling.hpp"
 #include "render/render.hpp"
 #include "render/shadow.hpp"
@@ -894,6 +897,118 @@ int main() {
         int filledWhole = 0;
         for (int y = 0; y < 7; ++y) for (int x = 0; x < 9; ++x) filledWhole += whole.color[whole.index(x, y) * 4] > 0;
         expect(filled == filledWhole && filled > 0, "to theo dai hang: ghep cac dai = to ca tam giac");
+    }
+
+    {
+        // Trinh soan duong cong (DHMTPTB3-16, -20, -34, -40).
+        auto P = [](float x, float y) { return Vec3{x, y, 0}; };
+        CurveEditor ed;
+        for (Vec3 p : {P(0, 0), P(0.2f, 0.05f), P(0.25f, 0.2f), P(0.15f, 0.3f)}) ed.addPoint(p);
+        expect(ed.segmentCount() == 1 && ed.toProfile().segments.size() == 1, "Bezier: 4 diem = 1 doan");
+        const int clicked = ed.addPoint(P(0.1f, 0.45f));
+        expect(ed.points.size() == 6 && clicked == 5 && near(ed.points[4], ed.points[3] * 2.0f - ed.points[2]),
+               "Bezier: bat dau doan moi tu chen diem dieu khien doi xung (C1)");
+        ed.addPoint(P(0.12f, 0.55f));
+        expect(ed.segmentCount() == 2, "Bezier: doan 2 chi can click them 2 diem");
+        auto c1 = [&](const CurveEditor& e, int seg) {  // tiep tuyen cuoi doan seg = tiep tuyen dau doan seg + 1
+            const Profile pr = e.toProfile();
+            return near(bezierTangent(pr.segments[seg], 1), bezierTangent(pr.segments[seg + 1], 0), 1e-4f);
+        };
+        expect(c1(ed, 0), "Bezier: noi 2 doan lien tuc C1");
+        const Vec3 before2 = ed.points[2], before4 = ed.points[4];
+        ed.movePoint(3, P(0.18f, 0.33f));  // keo diem noi
+        expect(c1(ed, 0) && near(ed.points[2] - before2, P(0.03f, 0.03f)) && near(ed.points[4] - before4, P(0.03f, 0.03f)),
+               "Bezier: keo diem noi -> 2 diem dieu khien ben canh tinh tien theo, van C1");
+        ed.movePoint(2, P(0.30f, 0.25f));  // keo diem dieu khien
+        expect(c1(ed, 0), "Bezier: keo diem dieu khien -> diem doi xung qua diem noi di theo, van C1");
+        ed.movePoint(5, P(-0.3f, 0.5f));
+        expect(ed.points[5].x == 0, "trinh soan: x bi kep >= 0 (khong vuot truc quay)");
+        ed.addPoint(P(0.1f, 0.6f));
+        ed.addPoint(P(0.0f, 0.62f));  // 3 doan
+        CurveEditor del = ed;
+        del.removePoint(4);           // diem dieu khien cua doan 2
+        expect(del.segmentCount() == 2 && (del.points.size() - 1) % 3 == 0 && c1(del, 0), "Bezier: xoa diem -> xoa ca doan, giu 3n + 1 va C1 cho noi");
+        expect(ed.nearest(P(0.181f, 0.331f), 0.01f) == 3 && ed.nearest(P(0.6f, 0.6f), 0.01f) == -1, "trinh soan: tim diem gan con tro");
+
+        // B-spline: n diem -> n + 1 doan (lap dau mut), di qua 2 dau mut, lien tuc C1 (thuc ra C2).
+        CurveEditor bs;
+        bs.kind = CurveEditor::Kind::BSpline;
+        for (Vec3 p : {P(0, 0), P(0.2f, 0.02f), P(0.25f, 0.2f), P(0.1f, 0.35f), P(0.12f, 0.5f), P(0, 0.55f)}) bs.addPoint(p);
+        const Profile bp = bs.toProfile();
+        bool bsC1 = bp.segments.size() == 7;
+        for (std::size_t k = 0; k + 1 < bp.segments.size(); ++k)
+            bsC1 = bsC1 && near(bp.segments[k][3], bp.segments[k + 1][0], 1e-5f) &&
+                   near(bezierTangent(bp.segments[k], 1), bezierTangent(bp.segments[k + 1], 0), 1e-4f);
+        expect(bsC1, "B-spline: 6 diem -> 7 doan Bezier, noi lien tuc C1");
+        expect(near(bp.segments.front()[0], P(0, 0)) && near(bp.segments.back()[3], P(0, 0.55f)), "B-spline: di qua diem dau va diem cuoi (cham truc)");
+        CurveEditor moved = bs;
+        moved.movePoint(1, P(0.3f, 0.05f));
+        const Profile mp = moved.toProfile();
+        int changed = 0;
+        for (std::size_t k = 0; k < bp.segments.size(); ++k)
+            for (int j = 0; j < 4; ++j)
+                if (!near(bp.segments[k][j], mp.segments[k][j])) { ++changed; break; }
+        expect(changed > 0 && changed <= 4, "B-spline: keo 1 diem chi doi toi da 4 doan quanh no (dieu khien cuc bo)");
+        const Mesh bm = revolve(bp, 6, 24, Material{});
+        std::string err;
+        expect(validate(bm, err) && !bm.triangles.empty(), "B-spline -> revolve: luoi hop le");
+
+        // Luu / tai (DHMTPTB3-40).
+        const std::string tmp = "build/test_profile.txt";
+        CurveEditor loaded;
+        expect(bs.save(tmp, err) && loaded.load(tmp, err) && loaded.kind == CurveEditor::Kind::BSpline && loaded.points.size() == bs.points.size() &&
+                   near(loaded.points[3], bs.points[3]), "luu / tai diem dieu khien giu nguyen kieu va toa do");
+        { std::ofstream bad("build/test_bad.txt"); bad << "kind bezier\np 0.1\n"; }
+        expect(!loaded.load("build/test_bad.txt", err) && err.find("dong 2") == 0 && loaded.points.size() == bs.points.size(),
+               "tai file sai: bao loi kem dong, khong lam hong du lieu dang co");
+
+        // Xuat .obj roi nap lai bang bo doc .obj cua phan B: cung so dinh, tam giac, vi tri.
+        Mesh vase = revolve(exhibitProfile(0), 6, 24, Material{});
+        vase.name = "binh";
+        Mesh back;
+        expect(exportObj(vase, "build/test_vase.obj", err) && loadObj("build/test_vase.obj", back, err) &&
+                   back.vertices.size() == vase.vertices.size() && back.triangles.size() == vase.triangles.size() &&
+                   near(back.vertices[17].position, vase.vertices[17].position, 1e-5f) && near(back.vertices[17].normal, vase.vertices[17].normal, 1e-5f),
+               "xuat .obj roi nap lai: giu dinh, phap tuyen, tam giac");
+
+        // Phap tuyen dang gach (DHMTPTB3-27): ve duoc khi nhin vat, khong ve gi khi vat sau lung.
+        Framebuffer fb;
+        fb.resize(160, 90);
+        SceneObject ball;
+        ball.mesh = makeSphere(0.5f, 12, 16, Material{});
+        ball.model = translate({0, 0, -3});
+        Camera cam;
+        cam.eye = {0, 0, 0};
+        auto countLit = [&] { int n = 0; for (std::size_t i = 0; i < fb.color.size(); i += 4) n += fb.color[i + 1] > 0; return n; };
+        fb.clear({0, 0, 0});
+        drawNormals(fb, {ball}, 0, cam, 0.1f, {0, 1, 0});
+        const int front = countLit();
+        cam.yaw = radians(180);
+        fb.clear({0, 0, 0});
+        drawNormals(fb, {ball}, 0, cam, 0.1f, {0, 1, 0});
+        expect(front > 50 && countLit() == 0, "phap tuyen: ve gach khi nhin thay vat, bo khi vat sau lung");
+
+        // Giao dien trinh soan: ve duoc ca 2 nua (duong cong ben trai, mat tron xoay ben phai).
+        Framebuffer screen;
+        screen.resize(960, 540);
+        EditorLayout L;
+        EditorFrame F;
+        F.deCasteljau = -1;
+        CurveEditor show;
+        show.fromProfile(exhibitProfile(0));
+        drawEditor(screen, show, revolve(show.toProfile(), 6, 24, Material{}), L, F);
+        auto at = [&](Vec3 px) { const std::size_t i = screen.index(int(px.x), int(px.y)) * 4; return Vec3{float(screen.color[i]), float(screen.color[i + 1]), float(screen.color[i + 2])}; };
+        const Vec3 c0 = L.toPixel(bezierPoint(show.toProfile().segments[2], 0.5f));
+        Vec3 onCurve{0, 0, 0};  // net cong mau vang (255, 217, 77) nam trong o 3 x 3 quanh diem
+        for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx) {
+                const Vec3 c = at({c0.x + dx, c0.y + dy, 0});
+                if (c.x > 200 && c.y > 180 && c.z < 120) onCurve = c;
+            }
+        int rightLit = 0;
+        for (int y = 0; y < 540; ++y)
+            for (int x = 490; x < 960; ++x) { const std::size_t i = screen.index(x, y) * 4; rightLit += screen.color[i] > 120; }
+        expect(onCurve.x > 200 && rightLit > 2000, "giao dien trinh soan: ve duong cong ben trai va mat tron xoay ben phai");
     }
 
     std::printf("%d dung, %d sai\n", gPass, gFail);

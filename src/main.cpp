@@ -11,6 +11,7 @@
 //   K canh minh hoa Painter (qua cau xuyen tam phang) <-> phong trung bay
 //   H bong do phang xuong san   keo qua cau den bang chuot: doi cho den
 //   F muc toi uu FPS: 1 luong -> 4 luong -> 4 luong + nua do phan giai khi di chuyen
+//   E trinh soan duong cong (Bezier/B-spline -> mat tron xoay)   N phap tuyen dang gach ngan
 //   U bat/tat texture   I noi suy texture dung phoi canh <-> tuyen tinh tren man hinh (de so sanh)
 
 #include <algorithm>
@@ -22,6 +23,9 @@
 #include <vector>
 
 #include "framebuffer.hpp"
+#include "modeling/curve_editor.hpp"
+#include "modeling/editor_view.hpp"
+#include "modeling/modeling.hpp"
 #include "pipeline.hpp"
 #include "platform/gl.hpp"
 #include "platform/frame_counter.hpp"
@@ -64,7 +68,23 @@ int gSelected = -1;
 // Phim K: doi giua phong trung bay va canh minh hoa Painter (qua cau xuyen tam phang).
 std::vector<SceneObject> gOtherScene;
 bool gPainterDemo = false;
-Camera gOtherCamera;          // vat dang chon (chi so trong gObjects), -1 = chua chon
+Camera gOtherCamera;
+
+// ---- Trinh soan duong cong (phim E, phan A: DHMTPTB3-16, -17, -20, -27, -34, -40) ----
+bool gEditorMode = false;
+CurveEditor gEditor;
+Mesh gEditorPreview;        // revolve() cua duong cong, tinh lai khi duong cong doi
+bool gEditorDirty = true;
+EditorLayout gLayout;
+EditorFrame gEditFrame;
+int gEditDrag = -1;         // diem dang keo
+int gPreset = 0;            // phim P: mau profile co san
+bool gDeCasteljauRun = false;
+std::chrono::steady_clock::time_point gDeCasteljauT0, gEditorT0 = std::chrono::steady_clock::now();
+std::string gEditorMsg = "Dang soan mau 1 (binh co thon). Keo diem de sua, Backspace de ve tu dau, P de doi mau.";
+bool gShowNormals = false;  // phim N: phap tuyen dang gach ngan (DHMTPTB3-27)
+const char* const kProfileFile = "profile.txt";
+const char* const kExportFile = "vat_tron_xoay.obj";          // vat dang chon (chi so trong gObjects), -1 = chua chon
 
 // CHE DO XEM TAM (phim G): ve khung day bang GL_LINES, chi de kiem tra camera va phong
 // trong luc phan C (Lam) chua co bo to tam giac. Dung chung ma tran view/projection tu cai
@@ -255,6 +275,144 @@ void renderWorld() {
     }
     renderScene(gFb, buildLightMarkers(gLights), gCamera, gLights, gSettings, more);
     addStats(gStats, more);
+    if (gShowNormals) drawNormals(gFb, gObjects, kRoomShellCount, gCamera, 0.04f, {0.3f, 1.0f, 0.5f});
+}
+
+// ---- Trinh soan duong cong ----
+Mesh revolveForEditor(const Material& m) {
+    Mesh mesh = revolve(gEditor.toProfile(), 10, 48, m);
+    mesh.name = "vat tu soan";
+    return mesh;
+}
+
+void displayEditor() {
+    if (gFb.width != kFullW || gFb.height != kFullH) gFb.resize(kFullW, kFullH);
+    if (gEditorDirty) {
+        Material m;
+        m.name = "gom soan";
+        m.kd = {0.85f, 0.75f, 0.55f}; m.ka = m.kd * 0.15f; m.ks = {0.5f, 0.5f, 0.5f}; m.shininess = 48;
+        gEditorPreview = revolveForEditor(m);
+        gEditorDirty = false;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    gEditFrame.previewAngle = 0.4f * std::chrono::duration<float>(now - gEditorT0).count();
+    const int segs = gEditor.segmentCount();
+    gEditFrame.deCasteljau = (gDeCasteljauRun && segs > 0)
+        ? std::fmod(0.5f * std::chrono::duration<float>(now - gDeCasteljauT0).count(), float(segs))  // 2 giay / doan
+        : -1.0f;
+    gEditFrame.selected = gEditDrag;
+    gFb.clear({0, 0, 0});
+    drawEditor(gFb, gEditor, gEditorPreview, gLayout, gEditFrame);
+
+    glClear(GL_COLOR_BUFFER_BIT);
+    present();
+    char l1[200], l2[200];
+    std::snprintf(l1, sizeof l1, "TRINH SOAN DUONG CONG (E: ve phong) | %s (S) | %zu diem, %d doan | %zu tam giac | %.0f FPS",
+                  gEditor.kind == CurveEditor::Kind::Bezier ? "Bezier noi C1" : "B-spline bac 3 deu",
+                  gEditor.points.size(), segs, gEditorPreview.triangles.size(), gFrameCounter.fps());
+    std::snprintf(l2, sizeof l2, "Trai: them/keo diem | Phai: xoa | T: de Casteljau | N: phap tuyen | P: mau | W/R: luu/tai %s | X: xuat .obj | Enter: dat len buc",
+                  kProfileFile);
+    glColor3f(1, 1, 1);
+    drawText(8, gWinH - 18, l1);
+    drawText(8, gWinH - 34, l2);
+    glColor3f(1.0f, 0.85f, 0.3f);
+    drawText(8, gWinH - 50, gEditorMsg);
+    if (gDeCasteljauRun && segs > 0) {
+        char l3[120];
+        const float g = gEditFrame.deCasteljau;
+        std::snprintf(l3, sizeof l3, "de Casteljau: doan %d, t = %.2f | xanh la: muc 1 (3 diem), xanh duong: muc 2, do: diem tren cong", int(g) + 1, g - std::floor(g));
+        drawText(8, gWinH - 66, l3);
+    }
+    glutSwapBuffers();
+    gFrameCounter.record();
+}
+
+// Enter: thay vat dang chon (hoac vat tren buc 1) bang mat tron xoay vua soan, dat day vat len mat buc.
+void placeOnStand() {
+    if (gPainterDemo) { gEditorMsg = "Dang o canh Painter: ve phong (K) truoc roi dat vat."; return; }
+    if (gEditor.segmentCount() == 0) { gEditorMsg = "Chua co doan cong nao."; return; }
+    const int first = kRoomShellCount + 1;
+    const bool selectedExhibit = gSelected >= first && (gSelected - kRoomShellCount) % 2 == 1 && gSelected < int(gObjects.size());
+    const int target = selectedExhibit ? gSelected : first;
+    if (target >= int(gObjects.size())) return;
+    SceneObject& obj = gObjects[target];
+    const SceneObject& stand = gObjects[target - 1];
+    float top = -1e9f, minY = 1e9f;
+    for (const Vertex& v : stand.mesh.vertices) top = std::max(top, transformPoint(stand.model, v.position).y);
+    Mesh mesh = revolveForEditor(obj.mesh.material);
+    for (const Vertex& v : mesh.vertices) minY = std::min(minY, v.position.y);
+    obj.mesh = std::move(mesh);
+    obj.model = translate({obj.model.m[0][3], top - minY, obj.model.m[2][3]});
+    gSelected = target;
+    gEditorMsg = "Da dat vat len buc (" + obj.mesh.material.name + "). Bam E de xem trong phong.";
+}
+
+void editorKey(unsigned char key) {
+    std::string err;
+    switch (key) {
+        case 27: std::exit(0);
+        case 'e': case 'E': gEditorMode = false; break;
+        case 's': case 'S':
+            gEditor.kind = gEditor.kind == CurveEditor::Kind::Bezier ? CurveEditor::Kind::BSpline : CurveEditor::Kind::Bezier;
+            gEditorMsg = gEditor.kind == CurveEditor::Kind::Bezier ? "Bezier: vuong = diem noi (tren cong), tron = diem dieu khien."
+                                                                   : "B-spline: keo 1 diem chi doi cac doan gan no; tu dong lien tuc C2.";
+            gEditorDirty = true;
+            break;
+        case 't': case 'T':
+            gDeCasteljauRun = !gDeCasteljauRun;
+            gDeCasteljauT0 = std::chrono::steady_clock::now();
+            break;
+        case 'n': case 'N': gEditFrame.showNormals = !gEditFrame.showNormals; break;
+        case 'p': case 'P':
+            gEditor.fromProfile(exhibitProfile(gPreset));
+            gEditorMsg = "Mau " + std::to_string(gPreset + 1) + "/5.";
+            gPreset = (gPreset + 1) % 5;
+            gEditorDirty = true;
+            break;
+        case 'w': case 'W':
+            gEditorMsg = gEditor.save(kProfileFile, err) ? std::string("Da luu ") + kProfileFile : err;
+            break;
+        case 'r': case 'R':
+            if (gEditor.load(kProfileFile, err)) { gEditorMsg = std::string("Da tai ") + kProfileFile; gEditorDirty = true; }
+            else gEditorMsg = err;
+            break;
+        case 'x': case 'X':
+            gEditorMsg = exportObj(revolveForEditor(Material{}), kExportFile, err)
+                ? std::string("Da xuat ") + kExportFile + " (mo duoc bang Blender, hoac ./build/phong_trung_bay " + kExportFile + ")"
+                : err;
+            break;
+        case 8: case 127:  // Backspace / Delete: xoa het
+            gEditor.points.clear();
+            gEditorMsg = "Da xoa het diem.";
+            gEditorDirty = true;
+            break;
+        case 13: case 10: placeOnStand(); break;
+        default: return;
+    }
+}
+
+void editorMouse(int button, int state, int x, int y) {
+    const float fx = x * float(kFullW) / gWinW, fy = y * float(kFullH) / gWinH;  // cua so -> framebuffer
+    const Vec3 p = gLayout.toProfile(fx, fy);
+    const float pick = 10.0f / gLayout.scale;                                     // ban kinh chon 10 pixel
+    if (button == GLUT_LEFT_BUTTON && state == GLUT_UP) { gEditDrag = -1; return; }
+    if (state != GLUT_DOWN || fx >= gLayout.panelWidth) return;
+    if (button == GLUT_LEFT_BUTTON) {
+        int i = gEditor.nearest(p, pick);
+        if (i < 0) i = gEditor.addPoint(p);
+        gEditDrag = i;
+        gEditorDirty = true;
+    } else if (button == GLUT_RIGHT_BUTTON) {
+        const int i = gEditor.nearest(p, pick);
+        if (i >= 0) { gEditor.removePoint(i); gEditorDirty = true; }
+    }
+}
+
+void editorMotion(int x, int y) {
+    if (gEditDrag < 0) return;
+    const float fx = x * float(kFullW) / gWinW, fy = y * float(kFullH) / gWinH;
+    gEditor.movePoint(gEditDrag, gLayout.toProfile(std::min(fx, float(gLayout.panelWidth)), fy));
+    gEditorDirty = true;
 }
 
 // Dang di chuyen? So vi tri mat, huong nhin, kieu chieu va vi tri den voi khung truoc.
@@ -268,6 +426,7 @@ bool viewMoving() {
 }
 
 void display() {
+    if (gEditorMode) { displayEditor(); return; }
     // Chon do phan giai va so luong theo muc toi uu.
     gSettings.threads = gOptLevel == 0 ? 1 : 4;
     const bool half = gOptLevel == 2 && !gRenderDemo && viewMoving();
@@ -333,9 +492,12 @@ void reshape(int w, int h) {
 }
 
 void keyboard(unsigned char key, int, int) {
+    if (gEditorMode) { editorKey(key); glutPostRedisplay(); return; }
     const float step = 0.15f;
     switch (key) {
         case 27: std::exit(0);
+        case 'e': case 'E': gEditorMode = true; break;
+        case 'n': case 'N': gShowNormals = !gShowNormals; break;
         case 't': case 'T': gRenderDemo = !gRenderDemo; break;
         case '1': gSettings.shading = ShadingMode::Wireframe; break;
         case '2': gSettings.shading = ShadingMode::Flat; break;
@@ -412,6 +574,7 @@ void special(int key, int, int) {
 }
 
 void mouse(int button, int state, int x, int y) {
+    if (gEditorMode) { editorMouse(button, state, x, y); glutPostRedisplay(); return; }
     if (button == GLUT_LEFT_BUTTON) {
         gDragging = state == GLUT_DOWN;
         gMouseX = x; gMouseY = y;
@@ -439,6 +602,7 @@ void mouse(int button, int state, int x, int y) {
 }
 
 void motion(int x, int y) {
+    if (gEditorMode) { editorMotion(x, y); glutPostRedisplay(); return; }
     if (!gDragging) return;
     if (gDragLight >= 0) {
         // Keo den tren mat phang ngang y = do cao den: giao tia chuot voi mat phang do.
@@ -484,6 +648,8 @@ int main(int argc, char** argv) {
     const std::string objPath = argc > 1 ? argv[1] : "assets/teapot.obj";
     std::string objError;
     gObjects = buildRoom(objPath, &objError);
+    gEditor.fromProfile(exhibitProfile(0));  // trinh soan mo san mau binh co thon
+    gPreset = 1;
     if (!objError.empty()) std::fprintf(stderr, "Khong nap duoc .obj: %s\n", objError.c_str());
 
     glutDisplayFunc(display);
