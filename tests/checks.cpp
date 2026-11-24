@@ -17,6 +17,9 @@
 #include "modeling/modeling.hpp"
 #include "render/render.hpp"
 #include "render/shadow.hpp"
+#include "scene/character.hpp"
+#include "scene/museum.hpp"
+#include "scene/visitor.hpp"
 #include "scene/obj_loader.hpp"
 #include "scene/texture_loader.hpp"
 #include "scene/scene.hpp"
@@ -1009,6 +1012,148 @@ int main() {
         for (int y = 0; y < 540; ++y)
             for (int x = 490; x < 960; ++x) { const std::size_t i = screen.index(x, y) * 4; rightLit += screen.color[i] > 120; }
         expect(onCurve.x > 200 && rightLit > 2000, "giao dien trinh soan: ve duong cong ben trai va mat tron xoay ben phai");
+    }
+
+    // --- Bao tang mo rong: mat bang, tuong, va cham, camera theo sau, kinh, nhan vat ---
+    {
+        const Museum mu = buildMuseum("assets/teapot.obj");
+        int walls = 0, floors = 0, glass = 0;
+        for (ObjKind k : mu.kind) {
+            walls += k == ObjKind::Wall;
+            floors += k == ObjKind::Floor;
+            glass += k == ObjKind::Glass;
+        }
+        expect(mu.zones.size() == 6 && walls == 6 && floors == 6, "bao tang: 6 khu (ca sanh don, san truoc), moi khu co san va tuong");
+        expect(mu.grid.zoneAt(mu.spawn.x, mu.spawn.z) == 5 && mu.grid.free(mu.spawn.x, mu.spawn.z, kCharacterRadius),
+               "bao tang: nhan vat bat dau o san truoc, cho trong");
+        int lit = 0;
+        for (const Zone& z : mu.zones)
+            for (const Light& l : z.lights) lit += l.attenuation > 0 && z.area.contains(l.position.x, l.position.z) && l.position.y < kRoomHeight;
+        expect(lit == 13, "den: 13 den tha tran, moi den nam trong khu cua no va co suy giam");
+        expect(mu.paintingCount() == 12 && mu.warnings.empty(), "bao tang: 12 tranh, nap du anh va texture (khong canh bao)");
+        expect(glass == 14, "bao tang: 7 tu kinh, moi tu 2 lop kinh");
+
+        // Moi tam giac tuong: phia truoc (theo phap tuyen) di duoc, phia sau la ngoai bao tang.
+        bool facing = true, doorOpen = true;
+        for (std::size_t i = 0; i < mu.objects.size(); ++i) {
+            if (mu.kind[i] != ObjKind::Wall) continue;
+            const Mesh& m = mu.objects[i].mesh;
+            for (const auto& t : m.triangles) {
+                const Vec3 c = (m.vertices[t[0]].position + m.vertices[t[1]].position + m.vertices[t[2]].position) / 3.0f;
+                const Vec3 n = normalize(faceNormal(m, t));
+                facing = facing && mu.grid.zoneAt(c.x + n.x * 0.1f, c.z + n.z * 0.1f) >= 0 && mu.grid.zoneAt(c.x - n.x * 0.1f, c.z - n.z * 0.1f) < 0;
+                if (std::fabs(c.x - 6) < 0.01f && ((c.z > -4.4f && c.z < -2.1f) || (c.z > 2.1f && c.z < 4.4f))) doorOpen = false;
+                if ((std::fabs(c.z - 6) < 0.01f || std::fabs(c.z - 10) < 0.01f) && c.x > -1.9f && c.x < 1.9f) doorOpen = false;  // cong, cua chinh
+            }
+        }
+        expect(facing, "tuong sinh tu luoi: moi mat huong vao phia di duoc");
+        expect(doorOpen, "tuong sinh tu luoi: cho sanh giap hanh lang va sanh don de trong (cua thong)");
+        expect(!mu.grid.free(-2, 6, 0.1f) && !mu.grid.free(2, 6, 0.1f) && mu.grid.free(0, 6, kCharacterRadius),
+               "cong chinh: 2 cot la vat can, giua cong di qua duoc");
+        const Vec3 outIn = mu.grid.slide({0, 0, 13}, {0, 0, -9}, kCharacterRadius);
+        expect(outIn.z < 4.1f, "cua chinh luon mo: tu san truoc di thang vao toi sanh chinh");
+
+        const Vec3 door = mu.grid.slide({5, 0, -3.25f}, {3, 0, 0}, kCharacterRadius);
+        const Vec3 wall = mu.grid.slide({5, 0, 0}, {3, 0, 0}, kCharacterRadius);
+        expect(door.x > 7.9f && wall.x <= 6 - kCharacterRadius + 1e-3f, "va cham: qua duoc cua sang hanh lang, khong xuyen tuong");
+        const Vec3 along = mu.grid.slide({5, 0, -0.5f}, {3, 0, 1.5f}, kCharacterRadius);  // tuong kin giua 2 cua
+        expect(along.x <= 6 - kCharacterRadius + 1e-3f && along.z > 0.95f, "va cham: cham tuong thi truot doc tuong");
+        expect(!mu.grid.free(-3.5f, 0.5f, kCharacterRadius) && mu.grid.free(0, 3.5f, kCharacterRadius), "va cham: buc la vat can, giua sanh thi trong");
+        expect(!mu.grid.free(23, 0, kCharacterRadius), "va cham: tu kinh la vat can");
+
+        const float back = springArm(mu.grid, {4, 1.55f, 5}, {0, 0, 1}, 3, kRoomHeight);
+        const float open = springArm(mu.grid, {4, 1.55f, 5}, {0, 0, -1}, 3, kRoomHeight);
+        expect(back > 0.6f && back < 0.85f && std::fabs(open - 3) < 0.06f, "camera theo sau: dung truoc tuong, cho trong thi lui du xa");
+
+        const Ray toDrum{{23, 0.95f, 3}, {0, 0, -1}};
+        const PickResult hit = pick(mu.objects, toDrum);
+        expect(hit.index >= 0 && mu.kind[hit.index] == ObjKind::Exhibit, "chon vat: click xuyen qua kinh trung co vat ben trong");
+
+        Character hero;
+        hero.position = {4, 0, 5};  // doan tuong kin (x = 0 la cong ra sanh don)
+        hero.build();
+        float lowest = 1e9f, highest = -1e9f;
+        for (const SceneObject& p : hero.parts)
+            for (const Vertex& v : p.mesh.vertices) {
+                const float y = transformPoint(p.model, v.position).y;
+                lowest = std::min(lowest, y);
+                highest = std::max(highest, y);
+            }
+        expect(std::fabs(lowest) < 0.01f && highest > 1.7f && highest < 1.8f, "nhan vat: chan cham san, cao khoang 1,75 m");
+        for (int k = 0; k < 40; ++k) hero.update(0.05f, {0, 0, 1}, mu.grid);
+        expect(hero.position.z <= 6 - kCharacterRadius + 1e-3f && std::fabs(std::fabs(hero.yaw) - kPi) < 0.05f && hero.stride < 0.5f,
+               "nhan vat: quay ve huong di (+z), dung lai truoc tuong, het vung chan");
+        Character walker = hero;
+        walker.position = {0, 0, 0};
+        walker.update(0.05f, {0, 0, -1}, mu.grid);
+        walker.update(0.05f, {0, 0, -1}, mu.grid);
+        expect(walker.stride > 0.3f && walker.phase > 0, "nhan vat: dang di thi pha buoc chan tang");
+
+        // Khach: moi diem dung cua 3 ke hoach deu di duoc; khach moi den o san truoc, tham quan roi ra ve.
+        bool reachable = true;
+        for (int plan = 0; plan < 3; ++plan)
+            for (float lane : {-0.8f, 0.0f, 0.8f})
+                for (const Waypoint& w : visitRoute(plan, lane)) reachable = reachable && mu.grid.free(w.position.x, w.position.z, kCharacterRadius);
+        expect(reachable, "khach: moi diem dung (vao, tham quan, ra) deu nam tren o di duoc");
+        std::vector<Visitor> crowd = makeVisitors(4);
+        for (int s = 0; s < 3; ++s) crowd.push_back(makeArrival(10 + s));
+        expect(mu.grid.zoneAt(crowd.back().body.position.x, crowd.back().body.position.z) == 5, "khach moi xuat hien o san truoc");
+        bool inside = true, cameIn = false;
+        int minGapCount = 0, steps = 0;
+        std::vector<bool> leftMuseum(crowd.size(), false);
+        for (; steps < 12000; ++steps) {  // toi da 600 giay, dt = 0,05
+            bool all = true;
+            for (std::size_t i = 0; i < crowd.size(); ++i) {
+                if (crowd[i].done) { leftMuseum[i] = true; continue; }
+                all = false;
+                std::vector<Vec3> others;
+                for (std::size_t j = 0; j < crowd.size(); ++j)
+                    if (j != i && !crowd[j].done) others.push_back(crowd[j].body.position);
+                crowd[i].update(0.05f, mu.grid, others);
+                inside = inside && mu.grid.insideWalls(crowd[i].body.position.x, crowd[i].body.position.z, 0.1f);
+                if (i >= 4 && crowd[i].body.position.z < 0) cameIn = true;  // khach moi da vao sau trong sanh
+            }
+            for (std::size_t i = 0; i < crowd.size(); ++i)
+                for (std::size_t j = i + 1; j < crowd.size(); ++j)
+                    minGapCount += !crowd[i].done && !crowd[j].done && length(crowd[i].body.position - crowd[j].body.position) < 0.3f;
+            if (all) break;
+        }
+        std::printf("  khach: 7 nguoi tham quan xong va ra ve sau %.0f giay, %d lan 2 nguoi sat nhau < 0,3 m\n", steps * 0.05f, minGapCount);
+        expect(std::all_of(leftMuseum.begin(), leftMuseum.end(), [](bool b) { return b; }) && cameIn && inside,
+               "khach: vao tu san truoc, tham quan, ra ve het; luon trong tuong");
+        expect(minGapCount < 80, "khach: hau nhu khong chong len nhau");
+    }
+    {
+        // Kinh: ve sau vat duc du dung truoc trong danh sach; tron mau, khong ghi Z-buffer.
+        Material red;
+        red.ka = {1, 0, 0}; red.kd = {0, 0, 0}; red.ks = {0, 0, 0};
+        Material pane;
+        pane.ka = {0, 0, 0.2f}; pane.kd = {0, 0, 0}; pane.ks = {0, 0, 0};
+        pane.opacity = 0.5f;
+        std::vector<SceneObject> objs(2);
+        objs[0].mesh = makeBox({1, 1, 0.01f}, pane);
+        objs[0].model = translate({0, 1.6f, -2});
+        objs[1].mesh = makeBox({1, 1, 0.01f}, red);
+        objs[1].model = translate({0, 1.6f, -3});
+        Camera cam;
+        cam.eye = {0, 1.6f, 0};
+        Framebuffer screen;
+        screen.resize(64, 48);
+        screen.clear({0, 0, 0});
+        RenderSettings rs;
+        FrameStats st;
+        renderScene(screen, objs, cam, {}, rs, st);
+        const std::size_t i = screen.index(32, 24) * 4;
+        expect(std::abs(screen.color[i] - 128) <= 2 && screen.color[i + 1] == 0 && std::abs(screen.color[i + 2] - 51) <= 2,
+               "kinh: mau = mau phia sau * (1 - do duc) + mau kinh");
+        expect(std::fabs(screen.depthAt(32, 24) - 2.99f) < 0.02f, "kinh: khong ghi Z-buffer (do sau van la cua vat phia sau)");
+
+        const Mat4 clip = cam.projectionMatrix(64.0f / 48) * cam.viewMatrix();
+        expect(sphereInFrustum(clip, {0, 1.6f, -5}, 0.5f) && !sphereInFrustum(clip, {0, 1.6f, 5}, 0.5f) && !sphereInFrustum(clip, {30, 1.6f, -5}, 0.5f),
+               "hinh chop nhin: vat phia truoc giu, vat sau lung va lech han bi bo");
+        std::vector<DrawItem> items = {{&objs[1], nullptr, {0, 1.6f, -3}, 1.5f}, {&objs[1], nullptr, {0, 1.6f, 8}, 1.5f}};
+        renderItems(screen, items, cam, rs, st);
+        expect(st.objectsCulled == 1 && st.trianglesIn == 12, "renderItems: bo ca vat ngoai hinh chop truoc khi bien doi");
     }
 
     std::printf("%d dung, %d sai\n", gPass, gFail);

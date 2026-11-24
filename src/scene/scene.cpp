@@ -395,7 +395,8 @@ PickResult pick(const std::vector<SceneObject>& objects, const Ray& ray) {
     float bestT = 1e30f;
     for (std::size_t i = 0; i < objects.size(); ++i) {
         const SceneObject& obj = objects[i];
-        if (!obj.visible) continue;
+        // Kinh trong suot: click xuyen qua kinh de chon co vat ben trong tu.
+        if (!obj.visible || obj.mesh.material.opacity < 1.0f) continue;
         Mat4 inv;
         if (!inverse(obj.model, inv)) continue;
         const Vec3 O = transformPoint(inv, ray.origin);
