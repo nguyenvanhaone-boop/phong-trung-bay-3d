@@ -33,6 +33,9 @@ struct Material {
     // Texture (Sprint 5, DHMTPTB3-41): khac null thi mau nen kd duoc nhan voi texel tai (u, v).
     // shared_ptr vi nhieu vat co the dung chung mot anh, va Material duoc sao chep theo gia tri.
     std::shared_ptr<const Texture> texture;
+    // Do duc (bao tang mo rong): 1 = vat duc (mac dinh). < 1 = vat trong suot (kinh tu trung bay):
+    // ve SAU moi vat duc, tu xa den gan, khong ghi Z-buffer, tron voi mau da co (xem render.cpp).
+    float opacity = 1.0f;
 };
 
 struct Mesh {

@@ -44,3 +44,25 @@ bool clipLineToRect(float& ax, float& ay, float& bx, float& by, float w, float h
 // Ve ca canh vao framebuffer. Thu tu: bien doi -> xen mat gan -> chieu -> Back-face -> Painter/Z-buffer -> to.
 void renderScene(Framebuffer& fb, const std::vector<SceneObject>& objects, const Camera& camera,
                  const std::vector<Light>& lights, const RenderSettings& settings, FrameStats& stats);
+
+// ---- Bao tang mo rong ----
+// Moi vat kem danh sach den rieng (den cua khu chua vat: tuong chan sang giua cac khu) va
+// mat cau bao (the gioi) de bo ca vat nam ngoai hinh chop nhin. radius < 0: khong thu bo.
+struct DrawItem {
+    const SceneObject* object = nullptr;
+    const std::vector<Light>* lights = nullptr;
+    Vec3 center;
+    float radius = -1;
+};
+
+// Mat cau (tam c, ban kinh r, the gioi) co cat hinh chop nhin cua ma tran clip = P * V khong?
+// 6 mat phang lay tu ma tran (Gribb–Hartmann): diem p nam trong khi -w <= x, y, z <= w,
+// tuc (hang4 +- hang_k) . p >= 0. Khoang cach co dau toi moi mat phang < -r -> nam ngoai han.
+bool sphereInFrustum(const Mat4& clip, Vec3 c, float r);
+
+// Nhu renderScene, nhung moi vat co den rieng va duoc thu bo theo hinh chop nhin.
+// Vat trong suot (material.opacity < 1) ve sau het, tu xa den gan, khong ghi Z-buffer:
+//   mau moi = mau cu * (1 - opacity) + mau tinh duoc cua kinh
+// (kinh de lot (1 - opacity) anh sang phia sau, va cong them phan anh sang no phan xa).
+void renderItems(Framebuffer& fb, const std::vector<DrawItem>& items, const Camera& camera,
+                 const RenderSettings& settings, FrameStats& stats);

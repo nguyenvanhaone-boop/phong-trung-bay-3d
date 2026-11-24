@@ -42,6 +42,9 @@ struct ScreenVertex {
 struct Light {
     Vec3 position{3, 4, 2};
     Vec3 color{1, 1, 1};
+    // Suy giam theo khoang cach d (bao tang mo rong): cuong do nhan 1 / (1 + attenuation * d^2).
+    // 0 = khong suy giam (nhu cu). Den bao tang dung > 0 de moi den sang mot vung quanh no.
+    float attenuation = 0;
 };
 
 // So lieu moi khung hinh, hien len man hinh va dung cho bang FPS trong bao cao.
@@ -50,5 +53,6 @@ struct FrameStats {
     int culledBackFace = 0;
     int clipped = 0;
     int trianglesDrawn = 0;
+    int objectsCulled = 0;    // vat nam ngoai hinh chop nhin, bo ca vat truoc khi bien doi (bao tang mo rong)
     double msTransform = 0, msRaster = 0;
 };

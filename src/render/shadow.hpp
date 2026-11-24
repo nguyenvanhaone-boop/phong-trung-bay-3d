@@ -24,11 +24,25 @@ void buildPlanarShadows(const std::vector<SceneObject>& casters, std::size_t fir
                         const Material& shadowMaterial, float roomHalfX, float roomHalfZ,
                         std::vector<SceneObject>& out, float lift = 0.003f);
 
+// Ban cho 1 den, vat do bong cho bang con tro (khong sao chep luoi). Them vao cuoi `out`.
+// Dung cho bao tang nhieu khu: moi den chi do bong cac vat cung khu voi no.
+void appendPlanarShadows(const std::vector<const SceneObject*>& casters, const Light& light,
+                         const Material& shadowMaterial, float roomHalfX, float roomHalfZ,
+                         std::vector<SceneObject>& out, float lift = 0.003f);
+
 // Qua cau nho phat sang tai vi tri moi den (ka = mau den, kd = ks = 0 -> khong bi to bong).
 std::vector<SceneObject> buildLightMarkers(const std::vector<Light>& lights, float radius = 0.1f);
+
+// Den tha tran (bao tang mo rong): bong den phat sang + chao den 2 mat (ngoai kim loai toi, trong
+// sang am) + day treo len tran cao `ceiling`. Luoi tinh tu tam bong den (goc toa do), dat bang
+// translate(vi tri den). Phan tu 0 la bong den (dung de chon / keo den bang chuot).
+std::vector<SceneObject> buildPendantLamp(const Light& light, float ceiling);
 
 // Phim N (DHMTPTB3-27): ve phap tuyen dinh thanh gach ngan dai `len` m (Bresenham), chi cac dinh
 // co phap tuyen huong ve mat; dung de chung minh phap tuyen giai tich khi thuyet trinh.
 // Ve objects[first], objects[first + 1], ... ; dau gach mau `color`.
 void drawNormals(Framebuffer& fb, const std::vector<SceneObject>& objects, std::size_t first, const Camera& camera,
+                 float len, Vec3 color);
+// Ban nhan danh sach con tro (bao tang: chi ve vat trung bay o cac khu dang thay).
+void drawNormals(Framebuffer& fb, const std::vector<const SceneObject*>& objects, const Camera& camera,
                  float len, Vec3 color);

@@ -20,7 +20,8 @@ Vec3 phongTerms(Vec3 point, Vec3 normal, Vec3 eye, const std::vector<Light>& lig
     const Vec3 V = normalize(eye - point);              // tu diem toi mat
     Vec3 I = mul(ka, kAmbient);
     for (const Light& light : lights) {
-        const Vec3 L = normalize(light.position - point);  // tu diem toi den
+        const Vec3 toLight = light.position - point;
+        const Vec3 L = normalize(toLight);  // tu diem toi den
         const float NL = dot(N, L);
         if (NL <= 0) continue;                           // den nam sau mat: khong khuech tan, khong phan xa
         float spec;
@@ -32,9 +33,19 @@ Vec3 phongTerms(Vec3 point, Vec3 normal, Vec3 eye, const std::vector<Light>& lig
             spec = std::max(dot(R, V), 0.0f);
         }
         const Vec3 term = kd * NL + ks * (spec > 0 ? std::pow(spec, shininess) : 0.0f);
-        I = I + mul(term, light.color);
+        // Suy giam theo khoang cach: f = 1 / (1 + k d^2) (k = 0: nhu mo hinh Phong goc).
+        const float att = light.attenuation > 0 ? 1.0f / (1.0f + light.attenuation * dot(toLight, toLight)) : 1.0f;
+        I = I + mul(term, light.color) * att;
     }
     return I;
+}
+
+// Tron mau cho vat trong suot: mau moi = mau cu * keep + add (keep = 1 - opacity).
+void blendPixel(Framebuffer& fb, int x, int y, Vec3 add, float keep) {
+    if (!fb.inside(x, y)) return;
+    std::uint8_t* p = &fb.color[fb.index(x, y) * 4];
+    const float rgb[3] = {add.x, add.y, add.z};
+    for (int c = 0; c < 3; ++c) p[c] = Framebuffer::toByte(p[c] / 255.0f * keep + rgb[c]);
 }
 
 }  // namespace
@@ -96,7 +107,9 @@ void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext
     const bool lit = ctx.material && ctx.lights;
     const bool phong = s.shading == ShadingMode::Phong && lit;
     const bool gouraud = s.shading == ShadingMode::Gouraud;
-    const bool perPixel = texture || useDepth || phong || gouraud;  // Flat khong texture, khong Z: to mot mau
+    const float opacity = ctx.material ? ctx.material->opacity : 1.0f;
+    const bool transparent = opacity < 1.0f;
+    const bool perPixel = texture || useDepth || phong || gouraud || transparent;  // Flat khong texture, khong Z: to mot mau
     const double ox = tri[0].x, oy = tri[0].y;
     const double e1x = double(tri[1].x) - ox, e1y = double(tri[1].y) - oy;
     const double e2x = double(tri[2].x) - ox, e2y = double(tri[2].y) - oy;
@@ -122,7 +135,7 @@ void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext
             const float z = static_cast<float>(w[0] * tri[0].z + w[1] * tri[1].z + w[2] * tri[2].z);
             float& stored = fb.depthAt(column, row);
             if (z >= stored) return;
-            stored = z;
+            if (!transparent) stored = z;  // kinh khong che vat sau no (vat sau da ve truoc roi)
         }
         Vec3 texel{1, 1, 1};
         if (texture) {
@@ -142,7 +155,8 @@ void fillTriangle(Framebuffer& fb, const ScreenVertex tri[3], const ShadeContext
             color = gouraud ? lerp(b, [](const ScreenVertex& v) { return v.color; }) : tri[0].color;
             color = mul(color, texel);
         }
-        fb.setPixel(column, row, color);
+        if (transparent) blendPixel(fb, column, row, color, 1 - opacity);
+        else fb.setPixel(column, row, color);
     };
 
     const ScreenVertex* sorted[3] = {&tri[0], &tri[1], &tri[2]};
@@ -255,19 +269,44 @@ double msSince(std::chrono::steady_clock::time_point t0) {
 
 }  // namespace
 
+bool sphereInFrustum(const Mat4& clip, Vec3 c, float r) {
+    for (int k = 0; k < 3; ++k)
+        for (int sign = -1; sign <= 1; sign += 2) {
+            float a[4];
+            for (int j = 0; j < 4; ++j) a[j] = clip.m[3][j] + sign * clip.m[k][j];
+            const float len = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+            if (len <= 0) continue;
+            if ((a[0] * c.x + a[1] * c.y + a[2] * c.z + a[3]) / len < -r) return false;
+        }
+    return true;
+}
+
 void renderScene(Framebuffer& fb, const std::vector<SceneObject>& objects, const Camera& camera,
                  const std::vector<Light>& lights, const RenderSettings& settings, FrameStats& stats) {
+    std::vector<DrawItem> items;
+    items.reserve(objects.size());
+    for (const SceneObject& o : objects) items.push_back(DrawItem{&o, &lights, {}, -1});
+    renderItems(fb, items, camera, settings, stats);
+}
+
+void renderItems(Framebuffer& fb, const std::vector<DrawItem>& items, const Camera& camera,
+                 const RenderSettings& settings, FrameStats& stats) {
     stats = FrameStats{};
     const Mat4 view = camera.viewMatrix();
     const Mat4 proj = camera.projectionMatrix(static_cast<float>(fb.width) / fb.height);
+    const Mat4 clip = proj * view;
     const Vec3 eye = camera.eyePosition();
+    static const std::vector<Light> kNoLights;
 
-    struct Pending { ScreenVertex v[3]; const Material* mat; float depth; };
+    struct Pending { ScreenVertex v[3]; const Material* mat; const std::vector<Light>* lights; float depth; };
     std::vector<Pending> queue;
 
     auto t0 = std::chrono::steady_clock::now();
-    for (const SceneObject& obj : objects) {
+    for (const DrawItem& item : items) {
+        const SceneObject& obj = *item.object;
         if (!obj.visible) continue;
+        if (item.radius >= 0 && !sphereInFrustum(clip, item.center, item.radius)) { ++stats.objectsCulled; continue; }
+        const std::vector<Light>* objLights = item.lights ? item.lights : &kNoLights;
         const Mat4 mv = view * obj.model;
         std::vector<ViewVertex> vv(obj.mesh.vertices.size());
         for (std::size_t i = 0; i < vv.size(); ++i) {
@@ -289,6 +328,7 @@ void renderScene(Framebuffer& fb, const std::vector<SceneObject>& objects, const
                 p.v[2] = project(poly[k + 1], proj, fb.width, fb.height);
                 if (settings.backFace && isBackFace(p.v)) { ++stats.culledBackFace; continue; }
                 p.mat = &obj.mesh.material;
+                p.lights = objLights;
                 p.depth = (p.v[0].z + p.v[1].z + p.v[2].z) / 3.0f;
                 queue.push_back(p);
             }
@@ -297,13 +337,18 @@ void renderScene(Framebuffer& fb, const std::vector<SceneObject>& objects, const
     stats.msTransform = msSince(t0);
 
     auto t1 = std::chrono::steady_clock::now();
+    const auto farFirst = [](const Pending& a, const Pending& b) { return a.depth > b.depth; };
+    // Vat duc ve truoc, vat trong suot (kinh) ve sau cung: kinh can thay mau cua vat phia sau no.
+    const auto opaqueEnd = std::stable_partition(queue.begin(), queue.end(), [](const Pending& p) { return p.mat->opacity >= 1.0f; });
     if (settings.painter) {
         // Painter (slide CG.6): ve tu XA den GAN, vat gan ve sau de len vat xa; khong can Z-buffer.
         // Do sau moi tam giac = trung binh z 3 dinh. SAI khi 2 tam giac cat nhau hoac che vong tron
         // (khong co thu tu nao dung) -> xem canh qua cau xuyen tam phang (phim K).
         // stable_sort: tam giac cung do sau giu thu tu cu -> anh khong nhay giua cac khung hinh.
-        std::stable_sort(queue.begin(), queue.end(), [](const Pending& a, const Pending& b) { return a.depth > b.depth; });
+        std::stable_sort(queue.begin(), opaqueEnd, farFirst);
     }
+    // Kinh: luon xa -> gan (giong Painter) vi tron mau phu thuoc thu tu: lop kinh gan phai tron sau.
+    std::stable_sort(opaqueEnd, queue.end(), farFirst);
 
     // ---- Song song hoa (DHMTPTB3-45) ----
     // Buoc 1: tinh mau dinh (Flat/Gouraud) cho tung tam giac — chia danh sach tam giac cho cac luong,
@@ -328,15 +373,15 @@ void renderScene(Framebuffer& fb, const std::vector<SceneObject>& objects, const
             if (settings.shading == ShadingMode::Flat) {
                 const Vec3 c = (p.v[0].world + p.v[1].world + p.v[2].world) / 3.0f;
                 const Vec3 nrm = normalize(cross(p.v[1].world - p.v[0].world, p.v[2].world - p.v[0].world));
-                p.v[0].color = shadePhong(c, nrm, eye, lights, *p.mat, settings.blinnPhong);
+                p.v[0].color = shadePhong(c, nrm, eye, *p.lights, *p.mat, settings.blinnPhong);
             } else if (settings.shading == ShadingMode::Gouraud) {
-                for (ScreenVertex& v : p.v) v.color = shadePhong(v.world, v.normal, eye, lights, *p.mat, settings.blinnPhong);
+                for (ScreenVertex& v : p.v) v.color = shadePhong(v.world, v.normal, eye, *p.lights, *p.mat, settings.blinnPhong);
             }
         }
     });
 
     ShadeContext base;
-    base.lights = &lights; base.eye = eye;
+    base.eye = eye;
     base.perspective = camera.projection == Projection::Perspective;
     if (settings.shading == ShadingMode::Wireframe) {
         // Khung day: Bresenham ve ca doan thang qua nhieu dai hang -> lam tuan tu.
@@ -363,6 +408,7 @@ void renderScene(Framebuffer& fb, const std::vector<SceneObject>& objects, const
                     const float bottom = std::max({p.v[0].y, p.v[1].y, p.v[2].y});
                     if (bottom < r0 - 1 || top > r1 + 1) continue;  // tam giac khong cham dai nay
                     ctx.material = p.mat;
+                    ctx.lights = p.lights;
                     fillTriangle(fb, p.v, ctx, settings, r0, r1);
                 }
             }
